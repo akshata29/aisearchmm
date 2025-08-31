@@ -4,7 +4,7 @@ import TimeAgo from "javascript-time-ago";
 import en from "javascript-time-ago/locale/en";
 import { createRoot } from "react-dom/client";
 
-import App from "./page/App.tsx";
+import App from "./pages/App.tsx";
 
 TimeAgo.addDefaultLocale(en);
 

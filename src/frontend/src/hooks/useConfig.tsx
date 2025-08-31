@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listIndexes } from "../api/api";
 import { OpenAIAPIMode } from "../api/models";
-import { SearchConfig } from "../components/SearchSettings";
+import { SearchConfig } from "../components/search/SearchSettings/SearchSettings";
 
 export default function useConfig() {
     const [config, setConfig] = useState<SearchConfig>({

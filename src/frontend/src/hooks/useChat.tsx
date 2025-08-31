@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { sendChatApi } from "../api/api";
 import { Thread, ProcessingStepsMessage, Chat, ThreadType, RoleType } from "../api/models";
-import { SearchConfig } from "../components/SearchSettings";
+import { SearchConfig } from "../components/search/SearchSettings/SearchSettings";
 
 // Custom hook for managing chat state
 export default function useChat(config: SearchConfig) {

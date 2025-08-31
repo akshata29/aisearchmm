@@ -42,13 +42,13 @@ from azure.core.pipeline.policies import UserAgentPolicy
 
 from azure.storage.blob.aio import BlobServiceClient
 
-from search_grounding import SearchGroundingRetriever
-from knowledge_agent import KnowledgeAgentGrounding
+from retrieval.search_grounding import SearchGroundingRetriever
+from retrieval.knowledge_agent import KnowledgeAgentGrounding
 from constants import USER_AGENT
-from multimodalrag import MultimodalRag
-from data_model import DocumentPerChunkDataModel
-from citation_file_handler import CitationFilesHandler
-from simple_upload_handler import upload_handler
+from retrieval.multimodal_rag import MultimodalRag
+from core.data_model import DocumentPerChunkDataModel
+from handlers.citation_file_handler import CitationFilesHandler
+from handlers.upload_handler import upload_handler
 
 # Load environment variables from .env file
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")

@@ -1,0 +1,26 @@
+.citations-title {
+    margin-bottom: 10px;
+}
+
+.citations {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.citation-interaction {
+    background-color: var(--colorNeutralBackground2);
+    border: 1px solid var(--colorNeutralStroke2);
+}
+
+sup.citation-icon {
+    color: var(--colorBrandForegroundLink);
+    cursor: pointer;
+}
+
+.citation-image-icon {
+    width: 20px;
+    height: 20px;
+    margin-left: 5px;
+    color: var(--colorNeutralForeground3);
+}

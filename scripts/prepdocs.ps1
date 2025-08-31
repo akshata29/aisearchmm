@@ -46,4 +46,4 @@ Start-Process -FilePath $venvPythonPath -ArgumentList "-m pip install -r $backen
 
 Write-Host 'Run the document preparation script'
 $args_indexer_strategy = $IndexerStrategy
-Start-Process -FilePath $venvPythonPath -ArgumentList "$backendPath/prepdocs.py --source files --indexer_strategy $args_indexer_strategy" -Wait -NoNewWindow
+Start-Process -FilePath $venvPythonPath -ArgumentList "$backendPath/data_ingestion/document_processor.py --source files --indexer_strategy $args_indexer_strategy" -Wait -NoNewWindow

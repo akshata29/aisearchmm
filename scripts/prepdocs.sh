@@ -35,4 +35,4 @@ echo 'Installing dependencies from "requirements.txt" into virtual environment (
 echo 'Run the document preparation script'
 args_indexer_strategy=${1:-'self-multimodal-embedding'}
 
-.venv/bin/python "src/backend/prepdocs.py" --source files --indexer_strategy $args_indexer_strategy 
+.venv/bin/python "src/backend/data_ingestion/document_processor.py" --source files --indexer_strategy $args_indexer_strategy 
