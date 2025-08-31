@@ -1,0 +1,106 @@
+.document-upload {
+    padding: 24px;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.upload-header {
+    margin-bottom: 24px;
+}
+
+.upload-header h2 {
+    margin-bottom: 8px;
+}
+
+.upload-message {
+    margin-bottom: 16px;
+}
+
+.upload-card {
+    margin-bottom: 24px;
+}
+
+.upload-area {
+    padding: 24px;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.file-drop-zone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 32px;
+    border: 2px dashed var(--colorNeutralStroke2);
+    border-radius: var(--borderRadiusMedium);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+    width: 100%;
+}
+
+.file-drop-zone:hover {
+    border-color: var(--colorBrandStroke1);
+    background-color: var(--colorNeutralBackground1Hover);
+}
+
+.upload-icon {
+    font-size: 48px;
+    color: var(--colorNeutralForeground3);
+}
+
+.file-selected {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--colorNeutralStroke2);
+    border-radius: var(--borderRadiusMedium);
+    background-color: var(--colorNeutralBackground2);
+    width: 100%;
+}
+
+.file-icon {
+    font-size: 32px;
+    color: var(--colorBrandForeground1);
+}
+
+.file-info {
+    flex: 1;
+}
+
+.file-info h3 {
+    margin: 0 0 4px 0;
+}
+
+.upload-actions {
+    padding: 16px 24px 24px 24px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.progress-card {
+    margin-bottom: 16px;
+}
+
+.progress-content {
+    padding: 16px 24px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.progress-icon {
+    font-size: 20px;
+}
+
+.progress-icon.success {
+    color: var(--colorPaletteGreenForeground1);
+}
+
+.progress-icon.error {
+    color: var(--colorPaletteRedForeground1);
+}

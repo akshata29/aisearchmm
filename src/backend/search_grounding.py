@@ -17,12 +17,12 @@ class SearchGroundingRetriever(GroundingRetriever):
         search_client: SearchClient,
         openai_client: AsyncAzureOpenAI,
         data_model: DataModel,
-        chatcompletions_model_name: str,
+        chatcompletions_deployment_name: str,
     ):
         self.search_client = search_client
         self.openai_client = openai_client
         self.data_model = data_model
-        self.chatcompletions_model_name = chatcompletions_model_name
+        self.chatcompletions_deployment_name = chatcompletions_deployment_name
 
     async def retrieve(
         self,
@@ -36,13 +36,22 @@ class SearchGroundingRetriever(GroundingRetriever):
         try:
             payload = self.data_model.create_search_payload(query, options)
 
-            search_results = await self.search_client.search(
-                search_text=payload["search"],
-                top=payload["top"],
-                vector_queries=payload["vector_queries"],
-                query_type=payload.get("query_type", "simple"),
-                select=payload["select"],
-            )
+            search_kwargs = {
+                "search_text": payload["search"],
+                "top": payload["top"],
+                "query_type": payload.get("query_type", "simple"),
+                "select": payload["select"],
+            }
+            
+            # Only add vector_queries if it exists in the payload
+            if "vector_queries" in payload:
+                search_kwargs["vector_queries"] = payload["vector_queries"]
+                
+            # Add semantic configuration if present
+            if "semantic_configuration_name" in payload:
+                search_kwargs["semantic_configuration_name"] = payload["semantic_configuration_name"]
+
+            search_results = await self.search_client.search(**search_kwargs)
         except Exception as e:
             raise Exception(f"Azure AI Search request failed: {str(e)}")
 
@@ -67,7 +76,7 @@ class SearchGroundingRetriever(GroundingRetriever):
             ]
 
             response = await self.openai_client.chat.completions.create(
-                model=self.chatcompletions_model_name,
+                model=self.chatcompletions_deployment_name,
                 messages=[
                     {"role": "system", "content": SEARCH_QUERY_SYSTEM_PROMPT},
                     *messages,

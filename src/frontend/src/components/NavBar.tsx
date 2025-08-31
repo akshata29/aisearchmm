@@ -17,7 +17,7 @@ interface Props {
 }
 
 export const NavBar = ({ setConfig, onNewChat, config }: Props) => {
-    const [isOpen, setIsOpen] = useState(false);
+    const [isOpen, setIsOpen] = useState(true);
 
     const getToolTipContent = () => {
         return isOpen ? "Close Settings" : "Open Settings";

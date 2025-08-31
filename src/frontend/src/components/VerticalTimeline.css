@@ -74,6 +74,11 @@
     margin-top: 10px;
 }
 
+.image-title {
+    font-weight: 600;
+    color: var(--colorNeutralForeground1);
+}
+
 .timeline-section-title {
     display: flex;
     gap: 10px;

@@ -62,7 +62,7 @@ const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg }) => {
                                                 />
                                                 {Array.isArray(msg.processingStep.content) && (
                                                     <div className="image-container">
-                                                        <Body2 style={{ fontWeight: "bold" }}>Images passed to LLM</Body2> <br />
+                                                        <Body2 className="image-title">Images passed to LLM</Body2> <br />
                                                         <div className="image-grid">
                                                             {msg.processingStep.content
                                                                 .flatMap(o => o.content)

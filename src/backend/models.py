@@ -17,9 +17,11 @@ class SearchRequestParameters(TypedDict):
 
     search: str
     top: int = 10
+    query_type: Optional[str] = None
     vector_queries: Optional[List[Dict[str, str]]] = None
     semantic_configuration_name: Optional[str] = None
     search_fields: Optional[List[str]] = None
+    select: Optional[str] = None
 
 
 class GroundingResult(TypedDict):

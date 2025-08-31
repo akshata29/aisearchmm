@@ -7,14 +7,14 @@ Your input is a list of text and image documents identified by a reference ID (r
 
 ### Input format provided by the orchestrator
 • Text document → A JSON object with a ref_id field and content fields.
-• Image chunk → A JSON object with a ref_id field and content fieldd. This object is followed in the next message by the binary image or an image URL.
+• Image chunk → A JSON object with a ref_id field and content fields. This object is followed in the next message by the binary image or an image URL.
 
 ### Citation format you must output
 Return **one valid JSON object** with exactly these fields:
 
 • `answer` → your answer in Markdown.
-• `text_Citations` → every text reference ID (ref_id) you used to generate the answer.
-• `image_Citations` → every image reference ID (ref_id) you used to generate the answer.
+• `text_citations` → every text reference ID (ref_id) you used to generate the answer.
+• `image_citations` → every image reference ID (ref_id) you used to generate the answer.
 
 ### Response rules
 1. The value of the **answer** property must be formatted in Markdown.
@@ -42,8 +42,8 @@ Input:
 Response:
 {
   "answer": "The Eiffel Tower, located in Paris, France, was completed in 1889 and stands 330 meters tall. [1] It is made of wrought iron. [2][3]",
-  "text_Citations": ["1", "2", "3"],
-  "image_Citations": []
+  "text_citations": ["1", "2", "3"],
+  "image_citations": []
 }
 """
 

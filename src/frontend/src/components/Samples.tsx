@@ -1,8 +1,6 @@
 import React from "react";
 
-import { Button } from "@fluentui/react-components";
 import "./Samples.css";
-import { Chat20Regular } from "@fluentui/react-icons";
 import samplesData from "../content/samples.json";
 
 interface Props {
@@ -19,17 +17,20 @@ const Samples: React.FC<Props> = ({ handleQuery }) => {
             <div className="samples-wrapper">
                 {samples &&
                     samples.map((sample, index) => (
-                        <Button
-                            style={{ backgroundColor: "rgba(221, 217, 217, 0.8)" }}
-                            size="large"
+                        <div
                             key={index}
                             onClick={() => handleQuery(sample, sample === newQuery)}
                             className="samples"
-                            icon={<Chat20Regular alignmentBaseline="alphabetic" />}
-                            iconPosition="after"
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    handleQuery(sample, sample === newQuery);
+                                }
+                            }}
                         >
                             {sample}
-                        </Button>
+                        </div>
                     ))}
             </div>
         </div>

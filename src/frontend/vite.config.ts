@@ -25,6 +25,21 @@ export default defineConfig({
             },
             "/get_citation_doc": {
                 target: "http://localhost:5000"
+            },
+            "/upload": {
+                target: "http://localhost:5000"
+            },
+            "/upload_status": {
+                target: "http://localhost:5000"
+            },
+            "/process_document": {
+                target: "http://localhost:5000"
+            },
+            "/delete_index": {
+                target: "http://localhost:5000"
+            },
+            "/api/delete_index": {
+                target: "http://localhost:5000"
             }
         }
     }

@@ -11,7 +11,7 @@ from azure.ai.documentintelligence.models import (
     DocumentParagraph,
 )
 from azure.ai.inference.aio import EmbeddingsClient, ImageEmbeddingsClient
-from azure.ai.inference.models import EmbeddingInput
+from azure.ai.inference.models import ImageEmbeddingInput
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from instructor import AsyncInstructor
 from azure.search.documents.aio import SearchClient
@@ -27,12 +27,15 @@ from azure.search.documents.indexes.models import (
     VectorSearch,
     VectorSearchProfile,
     HnswAlgorithmConfiguration,
+    VectorSearchAlgorithmKind,
     SemanticSearch,
     SemanticConfiguration,
     SemanticPrioritizedFields,
     SemanticField,
     AzureMachineLearningVectorizer,
     AzureMachineLearningParameters,
+    AzureOpenAIVectorizer,
+    AzureOpenAIVectorizerParameters,
 )
 from azure.storage.blob.aio import BlobServiceClient
 from helpers import get_blob_as_base64
@@ -50,7 +53,9 @@ class ProcessFile:
         instructor_openai_client: AsyncInstructor,
         blob_service_client: BlobServiceClient,
         chatcompletions_model_name: str,
-    ):
+        progress_callback=None,
+    ) -> None:
+        # Core clients
         self.document_client = document_client
         self.text_model = text_model
         self.image_model = image_model
@@ -58,7 +63,12 @@ class ProcessFile:
         self.index_client = index_client
         self.instructor_openai_client = instructor_openai_client
         self.blob_service_client = blob_service_client
+
+        # Settings
         self.chatcompletions_model_name = chatcompletions_model_name
+        self.progress_cb = progress_callback
+
+        # Storage containers
         self.container_client = self.blob_service_client.get_container_client(
             os.environ["ARTIFACTS_STORAGE_CONTAINER"]
         )
@@ -82,117 +92,33 @@ class ProcessFile:
             print(f"Error creating knowledgeStore container: {e}")
         
         try:
+            # Schema aligned with data_model.py and indexer_img_verbalize_strategy.py
             fields = [
-                SimpleField(
-                    name="content_id", type=SearchFieldDataType.String, key=True
-                ),
-                SimpleField(
-                    name="text_document_id",
-                    type=SearchFieldDataType.String,
-                    searchable=False,
-                    filterable=True,
-                    hidden=False,
-                    sortable=False,
-                    facetable=False,
-                ),
-                SimpleField(
-                    name="image_document_id",
-                    type=SearchFieldDataType.String,
-                    searchable=False,
-                    filterable=True,
-                    hidden=False,
-                    sortable=False,
-                    facetable=False,
-                ),
-                SearchableField(
-                    name="document_title",
-                    type=SearchFieldDataType.String,
-                    searchable=True,
-                    filterable=True,
-                    hidden=False,
-                    sortable=True,
-                    facetable=True,
-                ),
-                SearchableField(
-                    name="content_text",
-                    type=SearchFieldDataType.String,
-                    searchable=True,
-                    filterable=True,
-                    hidden=False,
-                    sortable=True,
-                    facetable=True,
-                ),
-                SearchField(
-                    name="content_embedding",
-                    hidden=False,
-                    type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
-                    vector_search_dimensions=1024,
-                    searchable=True,
-                    vector_search_profile_name="hnsw",
-                ),
-                SimpleField(
-                    name="content_path",
-                    type=SearchFieldDataType.String,
-                    searchable=False,
-                    filterable=True,
-                    hidden=False,
-                    sortable=False,
-                    facetable=False,
-                ),
-                ComplexField(
-                    name="locationMetadata",
-                    fields=[
-                        SimpleField(
-                            name="pageNumber",
-                            type=SearchFieldDataType.Int32,
-                            searchable=False,
-                            filterable=True,
-                            hidden=False,
-                            sortable=True,
-                            facetable=True,
-                        ),
-                        SimpleField(
-                            name="boundingPolygons",
-                            type=SearchFieldDataType.String,
-                            searchable=False,
-                            hidden=False,
-                            filterable=False,
-                            sortable=False,
-                            facetable=False,
-                        ),
-                    ],
-                ),
+                SearchableField(name="content_id", type=SearchFieldDataType.String, key=True, analyzer_name="keyword"),
+                SimpleField(name="text_document_id", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+                SimpleField(name="image_document_id", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+                SearchableField(name="document_title", type=SearchFieldDataType.String, searchable=True, filterable=True, hidden=False, sortable=True, facetable=True),
+                SearchableField(name="content_text", type=SearchFieldDataType.String, searchable=True, filterable=True, hidden=False, sortable=True, facetable=True),
+                SearchField(name="content_embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), vector_search_dimensions=1536, searchable=True, vector_search_profile_name="hnsw"),
+                SimpleField(name="content_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+                ComplexField(name="locationMetadata", fields=[
+                    SimpleField(name="pageNumber", type=SearchFieldDataType.Int32, searchable=False, filterable=True, hidden=False, sortable=True, facetable=True),
+                    SimpleField(name="boundingPolygons", type=SearchFieldDataType.String, searchable=False, hidden=False, filterable=False, sortable=False, facetable=False)
+                ])
             ]
 
             vector_search = VectorSearch(
                 algorithms=[
                     HnswAlgorithmConfiguration(
-                        name="defaulthnsw",
+                        name="hnsw-config",
                         kind="hnsw",
-                        parameters={
-                            "m": 4,
-                            "efConstruction": 400,
-                            "metric": "cosine",
-                        },
+                        parameters={"m": 4, "efConstruction": 400, "metric": "cosine"},
                     )
                 ],
                 profiles=[
                     VectorSearchProfile(
                         name="hnsw",
-                        algorithm_configuration_name="defaulthnsw",
-                        vectorizer_name="cohere-vectorizer",
-                    )
-                ],
-                vectorizers=[
-                    AzureMachineLearningVectorizer(
-                        vectorizer_name="cohere-vectorizer",
-                        aml_parameters=AzureMachineLearningParameters(
-                            scoring_uri=os.environ["AZURE_INFERENCE_EMBED_ENDPOINT"],
-                            model_name=os.environ["AZURE_INFERENCE_EMBED_MODEL_NAME"],
-                            authentication_key=os.environ[
-                                "AZURE_INFERENCE_EMBED_API_KEY"
-                            ],
-                        ),
+                        algorithm_configuration_name="hnsw-config",
                     )
                 ],
             )
@@ -211,17 +137,10 @@ class ProcessFile:
             )
 
             cors_options = CorsOptions(allowed_origins=["*"], max_age_in_seconds=60)
-            search_index = SearchIndex(
-                name=index_name,
-                fields=fields,
-                cors_options=cors_options,
-                vector_search=vector_search,
-                semantic_search=semantic_search,
-            )
+            search_index = SearchIndex(name=index_name, fields=fields, cors_options=cors_options, vector_search=vector_search, semantic_search=semantic_search)
 
-            await self.index_client.create_index(search_index)
-
-            print(f"Index {index_name} created successfully")
+            # Ensure index schema exists and is up to date
+            await self._ensure_index_exists(index_name, search_index)
         except Exception as e:
             print(f"Error creating index: {e}")
         ext = file_name.split(".")[-1].lower()
@@ -244,43 +163,61 @@ class ProcessFile:
             for region in paragraph.bounding_regions:
                 page_dict[region["pageNumber"]].append(paragraph)
 
-        for page_number, paragraphs in list(page_dict.items()):
+        # Report total pages available
+        if self.progress_cb:
+            try:
+                total_pages = len(page_dict.keys())
+                self.progress_cb(
+                    step="content_extraction",
+                    message=f"Starting content extraction across {total_pages} pages...",
+                    progress=None,
+                    increments={"total_pages": total_pages},
+                )
+            except Exception:
+                pass
+
+        for page_number, paras in list(page_dict.items()):
             print(f"Processing page {page_number} of {file_name}.")
             document_id = str(uuid.uuid4())
 
-            text_chunks, text_metadata = self._chunk_text_with_metadata(
-                page_number, paragraphs
-            )
+            text_chunks, text_metadata = self._chunk_text_with_metadata(page_number, paras)
 
             print(f"Extracted {len(text_chunks)} text chunks.")
             if text_chunks:
-                text_embeddings = (
-                    await self.text_model.embed(
-                        input=text_chunks,
-                        model=os.environ["AZURE_INFERENCE_EMBED_MODEL_NAME"],
-                    )
-                ).data
-
-                await asyncio.sleep(2)
+                text_embeddings_response = await self.text_model.embed(input=text_chunks)
+                text_embeddings = text_embeddings_response.data
 
                 for idx, chunk in enumerate(text_chunks):
                     documents.append(
                         {
-                            "content_id": f"{str(uuid.uuid4())}",
+                            "content_id": str(uuid.uuid4()),
+                            "text_document_id": document_id,
+                            "image_document_id": None,
                             "document_title": file_name,
-                            "text_document_id": f"{document_id}",
                             "content_text": chunk,
-                            "locationMetadata": text_metadata[idx],
                             "content_embedding": text_embeddings[idx].embedding,
+                            "content_path": f"{file_name}#page{page_number}",
+                            "locationMetadata": {
+                                "pageNumber": page_number,
+                                "boundingPolygons": json.dumps(text_metadata[idx].get("boundingPolygons", [])),
+                            },
                         }
                     )
-                    await self._check_and_index_documents(
-                        documents, file_name, index_name
-                    )
+                    await self._check_and_index_documents(documents, file_name, index_name)
 
-            associated_images = [
-                img for img in images if img.get("page_number") == page_number
-            ]
+                # Progress tick
+                if self.progress_cb:
+                    try:
+                        self.progress_cb(
+                            step="content_extraction",
+                            message=f"Processed {len(text_chunks)} text chunks on page {page_number}.",
+                            progress=None,
+                            increments={"pages_processed": 1, "chunks_created": len(text_chunks)},
+                        )
+                    except Exception:
+                        pass
+
+            associated_images = [img for img in images if img.get("page_number") == page_number]
 
             for img in associated_images:
                 print(f"Processing image {img['blob_name']} on page {page_number}.")
@@ -288,30 +225,57 @@ class ProcessFile:
                 blob_name = img["blob_name"]
                 blob_client = self.container_client.get_blob_client(blob_name)
                 image_base64 = await get_blob_as_base64(blob_client)
+                
+                # Generate content embedding for the image description
+                image_description = f"Image from page {img['page_number']} of {file_name}"
+                try:
+                    img_text_embedding_response = await self.text_model.embed(input=[image_description])
+                    image_content_embedding = img_text_embedding_response.data[0].embedding
+                except Exception as e:
+                    print(f"Failed to generate embedding for image description: {e}")
+                    continue
+                
+                # Omit image_vector to avoid dimension mismatch unless configured properly
                 documents.append(
                     {
-                        "content_id": f"{str(uuid.uuid4())}",
+                        "content_id": str(uuid.uuid4()),
+                        "text_document_id": None,
+                        "image_document_id": document_id,
                         "document_title": file_name,
-                        "image_document_id": f"{document_id}",
+                        "content_text": image_description,
+                        "content_embedding": image_content_embedding,
                         "content_path": blob_name,
                         "locationMetadata": {
                             "pageNumber": img["page_number"],
                             "boundingPolygons": json.dumps([img["boundingPolygons"]]),
                         },
-                        "content_embedding": await self._get_image_embedding(
-                            image_base64
-                        ),
                     }
                 )
-                await asyncio.sleep(2)
                 await self._check_and_index_documents(documents, file_name, index_name)
 
+            # Report image/figure counts for this page
+            if associated_images and self.progress_cb:
+                try:
+                    self.progress_cb(
+                        step="image_processing",
+                        message=f"Processed {len(associated_images)} images on page {page_number}.",
+                        progress=None,
+                        increments={"images_extracted": len(associated_images), "figures_processed": len(associated_images)},
+                    )
+                except Exception:
+                    pass
+
         if documents:
-            print(
-                f"Indexing remaining documents for {file_name} with {len(documents)} documents."
-            )
+            print(f"Indexing remaining documents for {file_name} with {len(documents)} documents.")
             await self._index_documents(index_name, documents)
             documents.clear()
+
+        # Final progress tick
+        if self.progress_cb:
+            try:
+                self.progress_cb(step="indexing_complete", message="Indexing complete.", progress=100, increments={})
+            except Exception:
+                pass
 
     async def analyze_document(self, file_bytes, file_name):
         print(f"Analyzing document {file_name}.")
@@ -325,7 +289,7 @@ class ProcessFile:
 
         except HttpResponseError as e:
             print(f"Error analyzing document {file_name}: {e}")
-            return
+            return [], []
 
         result: AnalyzeResult = await poller.result()
 
@@ -335,7 +299,18 @@ class ProcessFile:
             file_name, result, poller.details["operation_id"]
         )
 
-        return result.paragraphs, images
+        # Emit initial progress for analysis
+        if self.progress_cb:
+            try:
+                self.progress_cb(
+                    step="document_analysis",
+                    message=f"Detected {len(result.paragraphs or [])} paragraphs and {len(images)} figures.",
+                    progress=None,
+                    increments={}
+                )
+            except Exception:
+                pass
+        return result.paragraphs or [], images
 
     async def _check_and_index_documents(self, documents, file_name, index_name):
         """Checks if documents collection has reached 100 elements and indexes if needed."""
@@ -388,17 +363,13 @@ class ProcessFile:
 
     async def _get_image_embedding(self, image_base64: str):
         """Generates image embeddings."""
-        return (
-            (
-                await self.image_model.embed(
-                    input=[
-                        EmbeddingInput(image=f"data:image/png;base64,{image_base64}")
-                    ]
-                )
-            )
-            .data[0]
-            .embedding
+        # Note: Azure OpenAI text embedding models don't support image inputs
+        # For now, we'll create a dummy embedding or skip image embeddings
+        # In a real implementation, you'd use a proper image embedding model
+        response = await self.image_model.embed(
+            input=[f"Image content from document figure"]  # Placeholder text
         )
+        return response.data[0].embedding
 
     def _chunk_text_with_metadata(
         self, page_number, paragraphs: list[DocumentParagraph]
@@ -461,6 +432,31 @@ class ProcessFile:
     async def _index_documents(self, index_name, documents):
         """Indexes documents into Azure Cognitive Search."""
         try:
+            # Fetch current index fields and drop unknown properties to avoid 400s
+            try:
+                current_index = await self.index_client.get_index(index_name)
+                allowed_fields = {f.name for f in (current_index.fields or [])}
+                filtered = []
+                for doc in documents:
+                    unknown = set(doc.keys()) - allowed_fields
+                    if unknown:
+                        # Keep nested complex objects if root name exists (e.g., locationMetadata)
+                        safe_doc = {k: v for k, v in doc.items() if k in allowed_fields}
+                        filtered.append(safe_doc)
+                        print(f"Dropping unknown fields for index '{index_name}': {sorted(list(unknown))}")
+                    else:
+                        filtered.append(doc)
+                documents = filtered
+            except Exception as e:
+                # If index is missing, ensure and continue
+                missing = isinstance(e, ResourceNotFoundError) or (hasattr(e, 'message') and 'not found' in str(e).lower())
+                if missing:
+                    # Rebuild the desired schema and ensure index exists
+                    desired = await self._build_index_schema(index_name)
+                    await self._ensure_index_exists(index_name, desired)
+                else:
+                    print(f"Warning: could not fetch index schema before indexing: {e}")
+
             # Validate JSON before sending
             try:
                 json.dumps(documents)
@@ -468,7 +464,91 @@ class ProcessFile:
                 print(f"Invalid JSON in documents: {e}")
                 return
 
-            await self.search_client.upload_documents(documents=documents)
-            print(f"Indexed {len(documents)} documents.")
+            try:
+                await self.search_client.upload_documents(documents=documents)
+                print(f"Indexed {len(documents)} documents.")
+            except Exception as e:
+                # Retry once if index missing
+                missing = isinstance(e, ResourceNotFoundError) or (hasattr(e, 'message') and 'not found' in str(e).lower())
+                if missing:
+                    desired = await self._build_index_schema(index_name)
+                    await self._ensure_index_exists(index_name, desired)
+                    await self.search_client.upload_documents(documents=documents)
+                    print(f"Indexed {len(documents)} documents after recreating index.")
+                else:
+                    raise
         except Exception as e:
             print(f"Error indexing documents: {e}")
+
+    async def _build_index_schema(self, index_name: str) -> SearchIndex:
+        """Rebuilds the desired SearchIndex schema matching data_model.py and indexer strategy."""
+        fields = [
+            SearchableField(name="content_id", type=SearchFieldDataType.String, key=True, analyzer_name="keyword"),
+            SimpleField(name="text_document_id", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+            SimpleField(name="image_document_id", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+            SearchableField(name="document_title", type=SearchFieldDataType.String, searchable=True, filterable=True, hidden=False, sortable=True, facetable=True),
+            SearchableField(name="content_text", type=SearchFieldDataType.String, searchable=True, filterable=True, hidden=False, sortable=True, facetable=True),
+            SearchField(name="content_embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), vector_search_dimensions=1536, searchable=True, vector_search_profile_name="hnsw"),
+            SimpleField(name="content_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+            ComplexField(name="locationMetadata", fields=[
+                SimpleField(name="pageNumber", type=SearchFieldDataType.Int32, searchable=False, filterable=True, hidden=False, sortable=True, facetable=True),
+                SimpleField(name="boundingPolygons", type=SearchFieldDataType.String, searchable=False, hidden=False, filterable=False, sortable=False, facetable=False)
+            ])
+        ]
+
+        vector_search = VectorSearch(
+            profiles=[
+                VectorSearchProfile(name="hnsw", algorithm_configuration_name="hnsw-config")
+            ],
+            algorithms=[
+                HnswAlgorithmConfiguration(
+                    name="hnsw-config",
+                    kind=VectorSearchAlgorithmKind.HNSW,
+                    parameters={"m": 4, "efConstruction": 400, "efSearch": 500, "metric": "cosine"}
+                )
+            ]
+        )
+
+        semantic_search = SemanticSearch(
+            default_configuration_name="semantic-config",
+            configurations=[
+                SemanticConfiguration(
+                    name="semantic-config",
+                    prioritized_fields=SemanticPrioritizedFields(
+                        content_fields=[SemanticField(field_name="content_text")],
+                        keywords_fields=[SemanticField(field_name="document_title")]
+                    )
+                )
+            ],
+        )
+
+        cors_options = CorsOptions(allowed_origins=["*"], max_age_in_seconds=60)
+        return SearchIndex(
+            name=index_name,
+            fields=fields,
+            cors_options=cors_options,
+            vector_search=vector_search,
+            semantic_search=semantic_search,
+        )
+
+    async def _ensure_index_exists(self, index_name: str, desired: SearchIndex):
+        """Ensures the index exists with the desired schema; recreates if fields are missing."""
+        try:
+            existing = await self.index_client.get_index(index_name)
+            existing_fields = {f.name for f in existing.fields or []}
+            desired_fields = {f.name for f in desired.fields or []}
+            # If any desired field is missing, recreate index to avoid schema mismatch
+            if not desired_fields.issubset(existing_fields):
+                try:
+                    await self.index_client.delete_index(index_name)
+                except Exception:
+                    pass
+                await self.index_client.create_index(desired)
+                print(f"Index {index_name} recreated with expected schema")
+            else:
+                await self.index_client.create_or_update_index(desired)
+                print(f"Index {index_name} updated (no missing fields)")
+        except Exception:
+            # Not found or fetch failed; create fresh
+            await self.index_client.create_index(desired)
+            print(f"Index {index_name} created with expected schema")

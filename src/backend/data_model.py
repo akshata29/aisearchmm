@@ -38,24 +38,22 @@ class DocumentPerChunkDataModel(DataModel):
     def create_search_payload(
         self, query: str, search_config: SearchConfig
     ) -> SearchRequestParameters:
-        """Creates the search request payload with vector/semantic/hybrid configurations using a configured vectorizer."""
+        """Creates the search request payload with optional semantic search."""
 
+        # Use semantic query type only if semantic ranker is enabled
+        query_type = "semantic" if search_config.get("use_semantic_ranker", False) else "simple"
+        
         payload = {
             "search": query,
             "top": search_config["chunk_count"],
-            "vector_queries": [
-                {
-                    "text": query,
-                    "fields": "content_embedding",
-                    "kind": "text",
-                    "k": search_config["chunk_count"],
-                }
-            ],
             "select": "content_id, content_text, document_title, text_document_id, image_document_id, locationMetadata, content_path",
+            "query_type": query_type,
         }
 
-        if search_config["use_semantic_ranker"]:
-            payload["query_type"] = "semantic"
+        # Add semantic configuration if using semantic ranker
+        if search_config.get("use_semantic_ranker", False):
+            # Use the semantic configuration name that matches the index setup
+            payload["semantic_configuration_name"] = "semantic-config"
 
         return payload
 
@@ -64,7 +62,7 @@ class DocumentPerChunkDataModel(DataModel):
             "locationMetadata": document["locationMetadata"],
             "text": document["content_text"],
             "title": document["document_title"],
-            "content_id": document["content_id"],
+            "content_id": document.get("content_id") or document.get("id"),
             "docId": (
                 document["text_document_id"]
                 if document["text_document_id"] is not None
@@ -83,9 +81,9 @@ class DocumentPerChunkDataModel(DataModel):
             if is_text and result["content_text"] is not None:
                 collected_documents.append(
                     {
-                        "ref_id": result["content_id"],
+                        "ref_id": result.get("content_id") or result.get("id"),
                         "content": {
-                            "ref_id": result["content_id"],
+                            "ref_id": result.get("content_id") or result.get("id"),
                             "text": result["content_text"],
                         },
                         "content_type": "text",
@@ -95,7 +93,7 @@ class DocumentPerChunkDataModel(DataModel):
             elif is_image and result["content_path"] is not None:
                 collected_documents.append(
                     {
-                        "ref_id": result["content_id"],
+                        "ref_id": result.get("content_id") or result.get("id"),
                         "content": result["content_path"],
                         "content_type": "image",
                         **result,

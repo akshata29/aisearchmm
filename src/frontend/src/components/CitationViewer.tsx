@@ -24,7 +24,7 @@ const CitationViewer: React.FC<Props> = ({ show, toggle, citation }) => {
     }, [citation]);
 
     return (
-        <Drawer size="medium" position="end" separator open={show} onOpenChange={toggle} style={{ maxWidth: "550px" }}>
+        <Drawer size="medium" position="end" separator open={show} onOpenChange={toggle} className="citation-drawer">
             <DrawerHeader>
                 <DrawerHeaderTitle action={<Button appearance="subtle" aria-label="Close" icon={<Dismiss20Regular />} onClick={toggle} />}>
                     Citation
@@ -32,7 +32,7 @@ const CitationViewer: React.FC<Props> = ({ show, toggle, citation }) => {
             </DrawerHeader>
 
             <DrawerBody>
-                <div>
+                <div className="citation-content">
                     {pdfPath && (
                         <PdfHighlighter
                             pdfPath={pdfPath}

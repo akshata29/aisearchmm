@@ -27,7 +27,7 @@ class MultimodalRag(RagBase):
 
     def __init__(
         self,
-        knowledge_agent: KnowledgeAgentGrounding,
+        knowledge_agent: KnowledgeAgentGrounding | None,
         search_grounding: SearchGroundingRetriever,
         openai_client: AsyncAzureOpenAI,
         chatcompletions_model_name: str,
@@ -80,7 +80,7 @@ class MultimodalRag(RagBase):
                 ProcessingStep(
                     title="Grounding results received",
                     type="code",
-                    description=f"Retrieved {len(grounding_results["references"])} results.",
+                    description=f"Retrieved {len(grounding_results['references'])} results.",
                     content=grounding_results,
                 ),
             )
@@ -105,7 +105,8 @@ class MultimodalRag(RagBase):
         )
 
     def _get_grounding_retriever(self, search_config) -> GroundingRetriever:
-        if search_config["use_knowledge_agent"]:
+        # Use knowledge agent only if it's available and explicitly requested
+        if search_config["use_knowledge_agent"] and self.knowledge_agent is not None:
             logger.info("Using knowledge agent for grounding")
             return self.knowledge_agent
         else:
@@ -133,7 +134,7 @@ class MultimodalRag(RagBase):
                     collected_documents.append(
                         {
                             "type": "text",
-                            "text": f"The image below has the ID: [{doc["ref_id"]}]",
+                            "text": f"The image below has the ID: [{doc['ref_id']}]",
                         }
                     )
                     # blob path differs if index was created through self script in repo or from the portal mulitmodal RAG wizard

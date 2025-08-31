@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import aiohttp
 from typing import List
 from data_model import DataModel
@@ -54,6 +55,9 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         azure_openai_searchagent_model,
     ):
         logger.info(f"Creating retrieval agent for {agent_name}")
+        logger.info(f"OpenAI endpoint: {azure_openai_endpoint}")
+        logger.info(f"Deployment name: {azure_openai_searchagent_deployment}")
+        logger.info(f"Model name: {azure_openai_searchagent_model}")
         try:
             asyncio.create_task(
                 self.index_client.create_or_update_agent(
@@ -70,6 +74,7 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                                 azure_open_ai_parameters=AzureOpenAIVectorizerParameters(
                                     resource_url=azure_openai_endpoint,
                                     deployment_name=azure_openai_searchagent_deployment,
+                                    api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
                                     model_name=azure_openai_searchagent_model,
                                 )
                             )

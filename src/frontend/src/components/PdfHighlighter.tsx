@@ -103,8 +103,8 @@ const PdfHighlighter = ({ pdfPath, pageNumber, boundingPolygons }: PdfHighlighte
     }, [clearAndDraw, pageSize]);
 
     return (
-        <div style={{ position: "relative" }}>
-            <div style={{ position: "relative" }}>
+        <div className="pdf-highlighter">
+            <div className="pdf-highlighter-inner">
                 <Document file={pdfPath}>
                     <Page renderTextLayer={false} pageNumber={pageNumber} renderAnnotationLayer={false} onLoadSuccess={onPageLoadSuccess} />
                 </Document>
@@ -114,14 +114,7 @@ const PdfHighlighter = ({ pdfPath, pageNumber, boundingPolygons }: PdfHighlighte
                         ref={canvasRef}
                         width={pageSize.width}
                         height={pageSize.height}
-                        style={{
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                            pointerEvents: "none",
-                            width: "100%",
-                            height: "100%"
-                        }}
+                        className="pdf-overlay"
                     />
                 )}
             </div>
