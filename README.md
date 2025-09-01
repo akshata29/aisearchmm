@@ -36,6 +36,55 @@ Note that currently this sample doesn't have support for table extraction as a s
 **Text citations**![image](docs/images/sample_snap_3.jpg) ![image](docs/images/sample_snap_2.jpg) 
 **Image citations**![image](docs/images/image-cite-1.jpg) ![image](docs/images/image-cite-2.jpg) 
 
+## Application Features
+
+### Document Upload and Processing
+The application includes a comprehensive document upload system that allows users to easily add new documents to the knowledge base. The upload feature supports PDF documents and automatically processes them through the multimodal pipeline.
+
+![Upload Interface](docs/images/upload_1.jpg)
+*Document upload interface with drag-and-drop support*
+
+![Upload Process](docs/images/upload_2.jpg)
+*Real-time upload progress with processing status*
+
+![Upload Configuration](docs/images/upload_3.jpg)
+*Advanced upload settings including document type classification*
+
+![Batch Upload](docs/images/upload_4.jpg)
+*Support for multiple document uploads with individual progress tracking*
+
+![Upload Complete](docs/images/upload_5.jpg)
+*Upload completion with indexing status and success confirmation*
+
+**Key Upload Features:**
+- **Drag-and-drop interface**: Simple file upload with visual feedback
+- **Real-time progress tracking**: Monitor upload and processing status
+- **Document type classification**: Automatic categorization (quarterly reports, newsletters, articles, etc.)
+- **Batch processing**: Upload multiple documents simultaneously
+- **Automatic indexing**: Documents are automatically processed and added to the search index
+- **Error handling**: Clear feedback on upload failures with retry options
+
+### Admin Management Console
+The application provides a powerful admin interface for managing the search index, monitoring system health, and performing administrative tasks.
+
+![Admin Dashboard](docs/images/admin_1.jpg)
+*Admin dashboard with system overview and management options*
+
+![Admin Tools](docs/images/admin_2.jpg)
+*Advanced admin tools for index management and system configuration*
+
+**Key Admin Features:**
+- **Index Management**: View, update, and manage search index configurations
+- **Document Management**: Browse, edit, and delete indexed documents
+- **System Monitoring**: Monitor application health, performance metrics, and usage statistics
+- **Search Analytics**: Track search patterns, popular queries, and result quality
+- **Configuration Management**: Adjust search parameters, semantic ranker settings, and hybrid search options
+- **User Management**: Monitor user activity and access patterns
+- **Bulk Operations**: Perform batch operations on documents and index data
+- **System Maintenance**: Clear caches, rebuild indexes, and perform system optimization
+
+Both the upload and admin features are designed with user experience in mind, providing intuitive interfaces for both end-users and administrators to effectively manage and interact with the multimodal RAG system. 
+
 ## Azure AI Search Portal: Bring your own index and resources
 You can create an index using the AI Search portal's quick wizard for the multimodal scenario. Once the index is successfully created, you can integrate it with the app by running the following steps:
 
