@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, TypedDict
+from typing import List, Dict, TypedDict, Optional, Callable, Awaitable
 from openai import AsyncAzureOpenAI
 from core.data_model import DataModel
 from utils.prompts import SEARCH_QUERY_SYSTEM_PROMPT
@@ -29,11 +29,18 @@ class SearchGroundingRetriever(GroundingRetriever):
         user_message: str,
         chat_thread: List[Message],
         options: SearchConfig,
+        processing_step_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> GroundingResults:
 
+        if processing_step_callback:
+            await processing_step_callback("Generating search query...")
+        
         logger.info("Generating search query")
         query = await self._generate_search_query(user_message, chat_thread)
         logger.info(f"Generated search query: {query}")
+
+        if processing_step_callback:
+            await processing_step_callback(f"Generated search query: {query}")
 
         try:
             payload = self.data_model.create_search_payload(query, options)
@@ -53,6 +60,9 @@ class SearchGroundingRetriever(GroundingRetriever):
             if "semantic_configuration_name" in payload:
                 search_kwargs["semantic_configuration_name"] = payload["semantic_configuration_name"]
 
+            if processing_step_callback:
+                await processing_step_callback("Executing Azure AI Search query...")
+                
             search_results = await self.search_client.search(**search_kwargs)
         except Exception as e:
             raise Exception(f"Azure AI Search request failed: {str(e)}")
@@ -61,7 +71,13 @@ class SearchGroundingRetriever(GroundingRetriever):
         async for result in search_results:
             results_list.append(result)
 
+        if processing_step_callback:
+            await processing_step_callback(f"Found {len(results_list)} search results")
+
         references = await self.data_model.collect_grounding_results(results_list)
+
+        if processing_step_callback:
+            await processing_step_callback(f"Processed {len(references)} references successfully")
 
         return {
             "references": references,

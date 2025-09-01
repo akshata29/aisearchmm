@@ -60,13 +60,32 @@ class RagBase(ABC):
         )
         request_id = request_params.get("request_id", str(int(time.time())))
         response = await self._create_stream_response(request)
+        
         try:
             await self._process_request(
                 request_id, response, search_text, chat_thread, search_config
             )
         except Exception as e:
-            print(e)
             logger.error(f"Error processing request: {str(e)}")
+            # Always send processing step to show what went wrong
+            try:
+                await self._send_processing_step_message(
+                    request_id,
+                    response,
+                    ProcessingStep(
+                        title="Request processing failed",
+                        type="code",
+                        description=f"An error occurred during request processing: {str(e)}",
+                        content={
+                            "error": str(e),
+                            "query": search_text,
+                            "config": search_config
+                        }
+                    ),
+                )
+            except Exception as step_error:
+                logger.error(f"Failed to send error processing step: {str(step_error)}")
+            
             await self._send_error_message(request_id, response, str(e))
 
         await self._send_end(response)
@@ -103,61 +122,106 @@ class RagBase(ABC):
 
         complete_response: dict = {}
 
-        if search_config.get("use_streaming", False):
-            logger.info("Streaming chat completion")
-            chat_stream_response = instructor.from_openai(
-                self.openai_client,
-            ).chat.completions.create_partial(
-                stream=True,
-                model=self.chatcompletions_model_name,
-                response_model=AnswerFormat,
-                messages=messages,
-            )
-            msg_id = str(uuid.uuid4())
-
-            async for stream_response in chat_stream_response:
-                if stream_response.answer is not None:
-                    await self._send_answer_message(
-                        request_id, response, msg_id, stream_response.answer
-                    )
-                    complete_response = stream_response.model_dump()
-            if len(complete_response.keys()) == 0:
-                raise ValueError("No response received from chat completion stream.")
-
-        else:
-            logger.info("Waiting for chat completion")
-            chat_completion = await instructor.from_openai(
-                self.openai_client,
-            ).chat.completions.create(
-                stream=False,
-                model=self.chatcompletions_model_name,
-                response_model=AnswerFormat,
-                messages=messages,
-            )
-            msg_id = str(uuid.uuid4())
-
-            if chat_completion is not None:
-                await self._send_answer_message(
-                    request_id, response, msg_id, chat_completion.answer
+        try:
+            if search_config.get("use_streaming", False):
+                logger.info("Streaming chat completion")
+                chat_stream_response = instructor.from_openai(
+                    self.openai_client,
+                ).chat.completions.create_partial(
+                    stream=True,
+                    model=self.chatcompletions_model_name,
+                    response_model=AnswerFormat,
+                    messages=messages,
                 )
-                complete_response = chat_completion.model_dump()
+                msg_id = str(uuid.uuid4())
+
+                async for stream_response in chat_stream_response:
+                    if stream_response.answer is not None:
+                        await self._send_answer_message(
+                            request_id, response, msg_id, stream_response.answer
+                        )
+                        complete_response = stream_response.model_dump()
+                if len(complete_response.keys()) == 0:
+                    raise ValueError("No response received from chat completion stream.")
+
             else:
-                raise ValueError("No response received from chat completion stream.")
+                logger.info("Waiting for chat completion")
+                chat_completion = await instructor.from_openai(
+                    self.openai_client,
+                ).chat.completions.create(
+                    stream=False,
+                    model=self.chatcompletions_model_name,
+                    response_model=AnswerFormat,
+                    messages=messages,
+                )
+                msg_id = str(uuid.uuid4())
+
+                if chat_completion is not None:
+                    await self._send_answer_message(
+                        request_id, response, msg_id, chat_completion.answer
+                    )
+                    complete_response = chat_completion.model_dump()
+                else:
+                    raise ValueError("No response received from chat completion stream.")
+                
+        except Exception as llm_error:
+            # Always send processing step even if LLM fails
+            await self._send_processing_step_message(
+                request_id,
+                response,
+                ProcessingStep(
+                    title="LLM Error", 
+                    type="code", 
+                    description=f"LLM processing encountered an error: {str(llm_error)}",
+                    content={
+                        "error": str(llm_error),
+                        "llm_model": self.chatcompletions_model_name,
+                        "message_count": len(messages),
+                        "grounding_results_count": len(grounding_results.get('references', []))
+                    }
+                ),
+            )
+            # Re-raise the error so it can be handled by the calling method
+            raise
             
+        # Always send LLM response processing step (even for "cannot answer" responses)
         await self._send_processing_step_message(
             request_id,
             response,
-            ProcessingStep(title="LLM response", type="code", content=complete_response),
+            ProcessingStep(
+                title="LLM response", 
+                type="code", 
+                description=f"LLM generated response. Answer length: {len(complete_response.get('answer', ''))} characters",
+                content=complete_response
+            ),
         )
 
-        await self._extract_and_send_citations(
-            request_id,
-            response,
-            grounding_retriever,
-            grounding_results["references"],
-            complete_response["text_citations"] or [],
-            complete_response["image_citations"] or [],
-        )
+        # Always try to extract and send citations, even if answer is "cannot answer"
+        try:
+            await self._extract_and_send_citations(
+                request_id,
+                response,
+                grounding_retriever,
+                grounding_results["references"],
+                complete_response["text_citations"] or [],
+                complete_response["image_citations"] or [],
+            )
+        except Exception as citation_error:
+            await self._send_processing_step_message(
+                request_id,
+                response,
+                ProcessingStep(
+                    title="Citation extraction failed", 
+                    type="code", 
+                    description=f"Failed to extract citations: {str(citation_error)}",
+                    content={
+                        "error": str(citation_error),
+                        "text_citations": complete_response.get("text_citations", []),
+                        "image_citations": complete_response.get("image_citations", [])
+                    }
+                ),
+            )
+            # Don't re-raise citation errors, just log them
 
     async def _extract_and_send_citations(
         self,
@@ -250,15 +314,22 @@ class RagBase(ABC):
         logger.info(
             f"Sending processing step message for step: {processing_step.title}"
         )
-        await self._send_message(
-            response,
-            MessageType.ProcessingStep.value,
-            {
-                "request_id": request_id,
-                "message_id": str(uuid.uuid4()),
-                "processingStep": processing_step.to_dict(),
-            },
-        )
+        step_data = {
+            "request_id": request_id,
+            "message_id": str(uuid.uuid4()),
+            "processingStep": processing_step.to_dict(),
+        }
+        
+        try:
+            await self._send_message(
+                response,
+                MessageType.ProcessingStep.value,
+                step_data
+            )
+            logger.info(f"Successfully sent processing step: {processing_step.title}")
+        except Exception as e:
+            logger.error(f"Failed to send processing step '{processing_step.title}': {str(e)}")
+            raise
 
     async def _send_answer_message(
         self,

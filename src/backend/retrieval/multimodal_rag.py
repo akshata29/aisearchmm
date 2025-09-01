@@ -57,6 +57,10 @@ class MultimodalRag(RagBase):
             ProcessingStep(title="Search config", type="code", content=search_config),
         )
 
+        grounding_results = None
+        grounding_retriever = None
+        messages = None
+        
         try:
             await self._send_processing_step_message(
                 request_id,
@@ -70,39 +74,120 @@ class MultimodalRag(RagBase):
 
             grounding_retriever = self._get_grounding_retriever(search_config)
 
+            # Create a processing step callback to forward messages from the retriever
+            async def processing_step_callback(message: str):
+                await self._send_processing_step_message(
+                    request_id,
+                    response,
+                    ProcessingStep(
+                        title="Knowledge Agent Progress",
+                        type="info", 
+                        description=message,
+                        content={"message": message},
+                    ),
+                )
+
             grounding_results = await grounding_retriever.retrieve(
-                user_message, chat_thread, search_config
+                user_message, chat_thread, search_config, processing_step_callback
             )
 
+            references_count = len(grounding_results['references'])
+            
+            # Create a meaningful summary of what was retrieved
+            if references_count > 0:
+                # Show preview of actual retrieved content
+                content_preview = []
+                for i, ref in enumerate(grounding_results['references'][:3]):  # First 3 references
+                    content_text = ref.get('content', '')
+                    preview = content_text[:100] + "..." if len(content_text) > 100 else content_text
+                    content_preview.append({
+                        "ref_id": ref.get('ref_id'),
+                        "content_type": ref.get('content_type'),
+                        "preview": preview,
+                        "length": len(content_text)
+                    })
+                
+                description = f"Retrieved {references_count} document references"
+                if len(grounding_results['references']) > 3:
+                    description += f" (showing first 3)"
+                    
+                await self._send_processing_step_message(
+                    request_id,
+                    response,
+                    ProcessingStep(
+                        title="Document References Retrieved",
+                        type="code",
+                        description=description,
+                        content={
+                            "total_references": references_count,
+                            "content_preview": content_preview,
+                            "search_queries": grounding_results.get('search_queries', []),
+                            "full_results": grounding_results  # Include full results for debugging
+                        },
+                    ),
+                )
+            else:
+                await self._send_processing_step_message(
+                    request_id,
+                    response,
+                    ProcessingStep(
+                        title="No documents found",
+                        type="info",
+                        description="No documents matched the search criteria",
+                        content=grounding_results,
+                    ),
+                )
+
+        except Exception as e:
             await self._send_processing_step_message(
                 request_id,
                 response,
                 ProcessingStep(
-                    title="Grounding results received",
+                    title="Grounding failed",
                     type="code",
-                    description=f"Retrieved {len(grounding_results['references'])} results.",
-                    content=grounding_results,
+                    description=f"Error during grounding: {str(e)}",
+                    content={"error": str(e), "user_message": user_message}
                 ),
             )
-
-        except Exception as e:
             await self._send_error_message(
                 request_id, response, "Grounding failed: " + str(e)
             )
             return
 
-        messages = await self.prepare_llm_messages(
-            grounding_results, chat_thread, user_message
-        )
+        try:
+            messages = await self.prepare_llm_messages(
+                grounding_results, chat_thread, user_message
+            )
 
-        await self._formulate_response(
-            request_id,
-            response,
-            messages,
-            grounding_retriever,
-            grounding_results,
-            search_config,
-        )
+            await self._formulate_response(
+                request_id,
+                response,
+                messages,
+                grounding_retriever,
+                grounding_results,
+                search_config,
+            )
+            
+        except Exception as e:
+            # Even if LLM formulation fails, send processing steps to show what happened
+            await self._send_processing_step_message(
+                request_id,
+                response,
+                ProcessingStep(
+                    title="LLM processing failed",
+                    type="code",
+                    description=f"Error during LLM response generation: {str(e)}",
+                    content={
+                        "error": str(e), 
+                        "messages_sent_to_llm": messages,
+                        "grounding_results_count": len(grounding_results.get('references', [])) if grounding_results else 0
+                    }
+                ),
+            )
+            await self._send_error_message(
+                request_id, response, "LLM processing failed: " + str(e)
+            )
+            return
 
     def _get_grounding_retriever(self, search_config) -> GroundingRetriever:
         # Use knowledge agent only if it's available and explicitly requested

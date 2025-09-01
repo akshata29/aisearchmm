@@ -4,9 +4,10 @@ import logging
 import os
 import aiohttp
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable, Awaitable
 from core.data_model import DataModel
 from core.models import Message, GroundingResults, GroundingResult
+from core.processing_step import ProcessingStep
 from azure.search.documents.agent.aio import KnowledgeAgentRetrievalClient
 from azure.search.documents.agent.models import (
     KnowledgeAgentRetrievalResponse,
@@ -128,28 +129,36 @@ class KnowledgeAgentGrounding(GroundingRetriever):
     def _determine_reranker_params(self, options: dict) -> Dict[str, Any]:
         """Determine semantic reranker parameters based on query complexity and options."""
         query_complexity = options.get("query_complexity", "medium")  # low, medium, high
+        chunk_count = options.get("chunk_count", 10)  # Get the chunk count from frontend
         
+        # Base multipliers for different complexity levels
         if query_complexity == "high":
-            return {
-                "reranker_threshold": 1.8,  # Lower threshold for complex queries
-                "max_docs_for_reranker": 150,  # More documents for comprehensive analysis
-            }
+            base_multiplier = 15  # More comprehensive retrieval
+            threshold = 2.0  # Balanced threshold for complex queries
         elif query_complexity == "low":
-            return {
-                "reranker_threshold": 2.5,  # Higher threshold for simple queries
-                "max_docs_for_reranker": 50,   # Fewer documents for efficiency
-            }
+            base_multiplier = 5   # More focused retrieval
+            threshold = 1.5  # Lower threshold for simple queries (more lenient)
         else:  # medium (default)
-            return {
-                "reranker_threshold": 2.0,  # Balanced threshold
-                "max_docs_for_reranker": 100,  # Balanced document count
-            }
+            base_multiplier = 10  # Balanced retrieval
+            threshold = 1.8  # Balanced threshold
+        
+        # Calculate max_docs_for_reranker based on chunk_count
+        # Ensure we retrieve more documents than the final chunk count for better reranking
+        max_docs = max(chunk_count * base_multiplier, chunk_count + 20)  # At least 20 more than chunk_count
+        max_docs = min(max_docs, 500)  # Cap at 500 to avoid performance issues
+        max_docs = max(max_docs, 100)  # Ensure minimum of 100 as required by Azure AI Search
+        
+        return {
+            "reranker_threshold": threshold,
+            "max_docs_for_reranker": max_docs,
+        }
 
     async def retrieve(
         self,
         user_message: str,
         chat_thread: List[Message],
         options: dict,
+        processing_step_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> GroundingResults:
         """
         Enhanced retrieve method implementing prioritization logic:
@@ -158,6 +167,28 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         3. Semantic + keyword search combination
         """
         try:
+            if processing_step_callback:
+                # Combined setup and configuration message
+                setup_msg = "🔎 Knowledge Agent Setup & Configuration\n"
+                setup_msg += "• Building retrieval request with chat history\n"
+                
+                # Build enhanced filter for prioritization
+                filter_expression = self._build_enhanced_filter(options)
+                setup_msg += f"• Filter: {filter_expression or 'None'}\n"
+                
+                # Determine reranker parameters based on query complexity
+                reranker_params = self._determine_reranker_params(options)
+                setup_msg += f"• Reranker: threshold={reranker_params['reranker_threshold']}, max_docs={reranker_params['max_docs_for_reranker']}\n"
+                setup_msg += f"• Target chunk count: {options.get('chunk_count', 10)}\n"
+                setup_msg += "• Ready to execute retrieval..."
+                
+                await processing_step_callback(setup_msg)
+            else:
+                # Build enhanced filter for prioritization (still need these for the actual logic)
+                filter_expression = self._build_enhanced_filter(options)
+                # Determine reranker parameters based on query complexity
+                reranker_params = self._determine_reranker_params(options)
+                
             # Build messages in the correct format for agentic retrieval
             messages = []
             
@@ -177,12 +208,6 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                     content=[KnowledgeAgentMessageTextContent(text=user_message)]
                 )
             )
-
-            # Build enhanced filter for prioritization
-            filter_expression = self._build_enhanced_filter(options)
-            
-            # Determine reranker parameters based on query complexity
-            reranker_params = self._determine_reranker_params(options)
             
             # Prepare target index parameters with enhanced configuration
             target_index_params = KnowledgeAgentIndexParams(
@@ -194,6 +219,7 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             
             logger.info(f"Knowledge Agent retrieval with filter: {filter_expression}")
             logger.info(f"Reranker params: {reranker_params}")
+            logger.info(f"Target chunk count: {options.get('chunk_count', 10)}")
 
             # Execute agentic retrieval with enhanced parameters
             result = await self.retrieval_agent_client.retrieve(
@@ -207,7 +233,12 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             self._debug_retrieval_response(result)
 
             # Process results with enhanced citation extraction
-            references = await self._process_enhanced_results(result, options)
+            references = await self._process_enhanced_results(result, options, processing_step_callback)
+            
+            if processing_step_callback:
+                # Final summary of the entire Knowledge Agent process
+                summary_msg = f"✅ Knowledge Agent Complete: {len(references)} references found"
+                await processing_step_callback(summary_msg)
             
             return {
                 "references": references,
@@ -230,16 +261,36 @@ class KnowledgeAgentGrounding(GroundingRetriever):
     async def _process_enhanced_results(
         self, 
         result: KnowledgeAgentRetrievalResponse, 
-        options: dict
+        options: dict,
+        processing_step_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> List[GroundingResult]:
         """Process and enhance retrieval results with additional metadata."""
         references: List[GroundingResult] = []
         
         try:
             result_dict = result.as_dict()
-            logger.info(f"Processing {len(result_dict.get('response', []))} response items")
+            response_items = result_dict.get('response', [])
             
-            for ref in result_dict.get("response", []):
+            # Show detailed retrieval results instead of just counts
+            if processing_step_callback:
+                # Create detailed summary of what was retrieved - combine multiple messages into one
+                retrieval_summary = f"📊 Knowledge Agent Retrieval Results\n"
+                retrieval_summary += f"• Retrieved {len(response_items)} response items from index\n"
+                
+                # Add detailed breakdown
+                if response_items:
+                    retrieval_summary += "• Items breakdown:\n"
+                    for i, item in enumerate(response_items):
+                        item_sections = len(item.get("content", []))
+                        retrieval_summary += f"  - Item {i + 1}: {item_sections} content sections\n"
+                else:
+                    retrieval_summary += "• No response items returned from Knowledge Agent\n"
+                
+                await processing_step_callback(retrieval_summary)
+            
+            logger.info(f"Processing {len(response_items)} response items")
+            
+            for ref in response_items:
                 for content in ref.get("content", []):
                     content_text_str = content.get("text", "{}")
                     logger.debug(f"Processing content text: {content_text_str[:200]}...")
@@ -279,10 +330,37 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                         
                         references.append(enhanced_reference)
             
+            if processing_step_callback:
+                # Show actual processed references content
+                if references:
+                    summary_msg = f"✔️ Processed {len(references)} references from search results"
+                    await processing_step_callback(summary_msg)
+                else:
+                    await processing_step_callback("✔️ Processed 0 references - no content extracted from response items")
+            
             logger.info(f"Processed {len(references)} references successfully")
             
             # Apply post-processing prioritization if needed
+            pre_prioritization_count = len(references)
             references = self._apply_post_processing_prioritization(references, options)
+            
+            if processing_step_callback:
+                # Show post-processing results  
+                prioritization_msg = f"🎯 Post-processing: {pre_prioritization_count} → {len(references)} references"
+                await processing_step_callback(prioritization_msg)
+            
+            # Limit results to the requested chunk_count
+            chunk_count = options.get("chunk_count", 10)
+            pre_limit_count = len(references)
+            if len(references) > chunk_count:
+                references = references[:chunk_count]
+                if processing_step_callback:
+                    final_msg = f"📏 Applied chunk limit: {pre_limit_count} → {chunk_count} references"
+                    await processing_step_callback(final_msg)
+                logger.info(f"Limited results to {chunk_count} references based on chunk_count setting")
+            elif processing_step_callback and len(references) > 0:
+                final_msg = f"✅ Final {len(references)} references ready for LLM"
+                await processing_step_callback(final_msg)
             
         except Exception as e:
             logger.error(f"Error processing enhanced results: {str(e)}")
@@ -573,6 +651,7 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                 "post_processing_prioritization"
             ],
             "recommended_options": {
+                "chunk_count": 10,  # Number of final results to return
                 "recency_preference_days": 365,
                 "query_complexity": "medium",
                 "preferred_document_types": ["research_paper", "technical_document", "report"],

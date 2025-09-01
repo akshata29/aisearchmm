@@ -152,9 +152,71 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
         };
     };
 
+    // Helper function to find processing steps for a message, even if request IDs don't match exactly
+    const findProcessingStepsForMessage = (message: any): ProcessingStepsMessage[] | null => {
+        console.log("DEBUG: Looking for processing steps for message:", message.request_id);
+        console.log("DEBUG: Available processing step keys:", Object.keys(processingStepMsg));
+        
+        // First try exact match
+        if (processingStepMsg?.[message.request_id] && processingStepMsg[message.request_id].length > 0) {
+            console.log("DEBUG: Found exact match for", message.request_id);
+            return processingStepMsg[message.request_id];
+        }
+        
+        // If exact match fails, try to find by timestamp proximity or other criteria
+        // Since frontend request_id is timestamp, try to find processing steps close to that time
+        const messageTimestamp = parseInt(message.request_id);
+        if (!isNaN(messageTimestamp)) {
+            for (const [stepRequestId, steps] of Object.entries(processingStepMsg)) {
+                if (steps && steps.length > 0) {
+                    const stepTimestamp = parseInt(stepRequestId);
+                    if (!isNaN(stepTimestamp)) {
+                        // If timestamps are within 30 seconds, consider it a match
+                        const timeDiff = Math.abs(messageTimestamp - stepTimestamp);
+                        console.log(`DEBUG: Comparing ${messageTimestamp} vs ${stepTimestamp}, diff: ${timeDiff}`);
+                        if (timeDiff < 30000) {
+                            console.log("DEBUG: Found close timestamp match");
+                            return steps;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // As a last resort, if this is the most recent message and there are processing steps available,
+        // assume they belong to this message
+        const allStepKeys = Object.keys(processingStepMsg);
+        if (allStepKeys.length > 0) {
+            const latestStepKey = allStepKeys[allStepKeys.length - 1];
+            if (processingStepMsg[latestStepKey] && processingStepMsg[latestStepKey].length > 0) {
+                console.log("DEBUG: Using latest processing steps as fallback");
+                return processingStepMsg[latestStepKey];
+            }
+        }
+        
+        console.log("DEBUG: No processing steps found");
+        return null;
+    };
+
     const getCurProcessingStep = (requestId: string): Record<string, ProcessingStepsMessage[]> => {
-        const processingSteps = processingStepMsg[requestId];
-        return { [requestId]: processingSteps };
+        // First try exact match
+        const exactSteps = processingStepMsg[requestId];
+        if (exactSteps && exactSteps.length > 0) {
+            return { [requestId]: exactSteps };
+        }
+        
+        // Try to find steps using our helper function
+        // We need to find the message object first
+        const message = thread.find(t => t.request_id === requestId);
+        if (message) {
+            const foundSteps = findProcessingStepsForMessage(message);
+            if (foundSteps) {
+                return { [requestId]: foundSteps };
+            }
+        }
+        
+        // Fallback to original logic
+        return { [requestId]: exactSteps || [] };
     };
 
     const handleCopyMessage = (requestId: string) => {
@@ -378,6 +440,18 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                                                             >
                                                                 {message.answerPartial?.answer}
                                                             </ReactMarkdown>
+                                                            
+                                                            {/* Show processing steps suggestion when AI cannot answer */}
+                                                            {message.answerPartial?.answer && 
+                                                             message.answerPartial.answer.toLowerCase().includes("cannot answer") && 
+                                                             findProcessingStepsForMessage(message) && (
+                                                                <div style={{ marginTop: "12px", padding: "8px", backgroundColor: "var(--colorNeutralBackground3)", borderRadius: "4px", border: "1px solid var(--colorNeutralStroke2)" }}>
+                                                                    <Caption1 style={{ fontStyle: "italic", color: "var(--colorNeutralForeground2)" }}>
+                                                                        💡 Click the "Steps" button below to see what data was retrieved and how the AI processed your query.
+                                                                    </Caption1>
+                                                                </div>
+                                                            )}
+                                                            
                                                             {isTyping && msgIndex === group.length - 1 && (
                                                                 <div className="typing-indicator">
                                                                     <Spinner size="tiny" />
@@ -399,6 +473,46 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                                                         </MessageBar>
                                                     )}
                                                 </CardPreview>
+
+                                                {/* Steps button - show for any answer type, regardless of citations */}
+                                                {(message.type === ThreadType.Answer) && (
+                                                    <CardFooter className="message-footer-modern">
+                                                        <div className="message-actions-modern">
+                                                            <div className="feedback-actions">
+                                                                <Tooltip content="View processing steps" relationship="label">
+                                                                    {(() => {
+                                                                        const hasSteps = findProcessingStepsForMessage(message);
+                                                                        const isDisabled = !hasSteps;
+                                                                        console.log(`Steps button for ${message.request_id}: hasSteps=${!!hasSteps}, disabled=${isDisabled}`);
+                                                                        return (
+                                                                            <Button
+                                                                                size="small"
+                                                                                icon={<BrainCircuit20Regular />}
+                                                                                appearance={
+                                                                                    message.answerPartial?.answer && 
+                                                                                    message.answerPartial.answer.toLowerCase().includes("cannot answer") 
+                                                                                        ? "primary" 
+                                                                                        : "subtle"
+                                                                                }
+                                                                                className="action-button"
+                                                                                disabled={isDisabled}
+                                                                                onClick={() => {
+                                                                                    const foundSteps = findProcessingStepsForMessage(message);
+                                                                                    console.log("Steps button clicked for message:", message.request_id);
+                                                                                    console.log("Found processing steps:", foundSteps ? foundSteps.length : 0);
+                                                                                    setShowProcessingSteps(true);
+                                                                                    setProcessRequestId(message.request_id);
+                                                                                }}
+                                                                            >
+                                                                                Steps
+                                                                            </Button>
+                                                                        );
+                                                                    })()}
+                                                                </Tooltip>
+                                                            </div>
+                                                        </div>
+                                                    </CardFooter>
+                                                )}
 
                                                 {(message.type === ThreadType.Answer) && (imageCitations.length > 0 || textCitations.length > 0) && (
                                                     <CardFooter className="message-footer-modern">
@@ -447,22 +561,6 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                                                                         className={`feedback-button ${isDisliked ? "disliked" : ""}`}
                                                                         onClick={() => handleDislikeMessage(message.request_id)}
                                                                     />
-                                                                </Tooltip>
-                                                                
-                                                                <Tooltip content="View processing steps" relationship="label">
-                                                                    <Button
-                                                                        size="small"
-                                                                        icon={<BrainCircuit20Regular />}
-                                                                        appearance="subtle"
-                                                                        className="action-button"
-                                                                        disabled={!processingStepMsg?.[message.request_id] || processingStepMsg[message.request_id].length === 0}
-                                                                        onClick={() => {
-                                                                            setShowProcessingSteps(true);
-                                                                            setProcessRequestId(message.request_id);
-                                                                        }}
-                                                                    >
-                                                                        Steps
-                                                                    </Button>
                                                                 </Tooltip>
                                                                 
                                                                 <Tooltip content="More options" relationship="label">

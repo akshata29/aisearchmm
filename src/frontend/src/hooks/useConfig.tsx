@@ -9,7 +9,14 @@ export default function useConfig() {
         chunk_count: 10,
         openai_api_mode: OpenAIAPIMode.ChatCompletions,
         use_streaming: true,
-        use_knowledge_agent: true
+        use_knowledge_agent: true,
+        
+        // Enhanced Knowledge Agent options with defaults
+        recency_preference_days: 365,
+        query_complexity: "medium",
+        preferred_document_types: [],
+        enable_post_processing_boost: true,
+        additional_filters: []
     });
 
     const [indexes, setIndexes] = useState<string[]>([]);
