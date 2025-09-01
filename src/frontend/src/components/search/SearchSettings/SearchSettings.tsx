@@ -37,6 +37,18 @@ export interface SearchConfig {
     preferred_document_types?: string[];  // e.g., ["research_paper", "technical_document"]
     enable_post_processing_boost?: boolean;
     additional_filters?: string[];  // Additional OData filters
+    
+    // Hybrid Search Configuration (when not using Knowledge Agent)
+    use_hybrid_search?: boolean;  // Enable hybrid search (text + vector)
+    use_query_rewriting?: boolean;  // Enable semantic query rewriting
+    use_scoring_profile?: boolean;  // Enable scoring profile for freshness/type boosts
+    scoring_profile_name?: string;  // Name of the scoring profile to use
+    vector_weight?: number;  // Weight for vector queries in hybrid search (0.0-1.0)
+    rrf_k_parameter?: number;  // RRF k parameter for ranking fusion
+    semantic_ranking_threshold?: number;  // Minimum semantic score threshold
+    enable_vector_filters?: boolean;  // Enable pre/post filtering for vector queries
+    vector_filter_mode?: "preFilter" | "postFilter";  // Vector filter mode
+    query_rewrite_count?: number;  // Number of query rewrites to generate
 }
 
 const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
@@ -59,10 +71,28 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     const handleSwitchChange = (key: keyof typeof config, checked: boolean) => {
         setConfig(prev => {
             const newConfig = { ...prev, [key]: checked } as SearchConfig;
+            
             // When Knowledge Agent is enabled, Semantic Ranker must also be enabled
             if (key === "use_knowledge_agent" && checked) {
                 newConfig.use_semantic_ranker = true;
+                // Disable hybrid search features when Knowledge Agent is enabled
+                newConfig.use_hybrid_search = false;
+                newConfig.use_query_rewriting = false;
+                newConfig.use_scoring_profile = false;
+                newConfig.enable_vector_filters = false;
             }
+            
+            // When Hybrid Search is enabled, Semantic Ranker should also be enabled for best results
+            if (key === "use_hybrid_search" && checked) {
+                newConfig.use_semantic_ranker = true;
+            }
+            
+            // When Knowledge Agent is disabled, allow advanced search features
+            if (key === "use_knowledge_agent" && !checked) {
+                // Keep semantic ranker setting as user configured
+                // Don't automatically enable hybrid search - let user choose
+            }
+            
             return newConfig;
         });
     };
@@ -125,12 +155,12 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
             <Switch
                 id="useSemanticRankerSwitch"
                 checked={config.use_semantic_ranker}
-                disabled={config.use_knowledge_agent}
+                disabled={config.use_knowledge_agent || config.use_hybrid_search}
                 onChange={(_, data: SwitchOnChangeData) => handleSwitchChange("use_semantic_ranker", data.checked)}
                 label={
                     <InfoLabel
                         label={"Use semantic ranker"}
-                        info={<>Enable semantic ranker for improved results especially if your data is indexed using image verbalization technique</>}
+                        info={<>Enable semantic ranker for improved results especially if your data is indexed using image verbalization technique. Automatically enabled with Knowledge Agent and Hybrid Search.</>}
                     />
                 }
             />
@@ -261,6 +291,137 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
                             />
                         }
                     />
+                </>
+            )}
+
+            {/* Hybrid Search specific settings - only when Knowledge Agent is OFF */}
+            {!config.use_knowledge_agent && (
+                <>
+                    <Divider style={{ margin: "16px 0" }} />
+                    <Text size={300} weight="semibold" style={{ display: "block", marginBottom: "12px", color: "var(--colorNeutralForeground2)" }}>
+                        Advanced Search Options
+                    </Text>
+
+                    <Switch
+                        id="useHybridSearchSwitch"
+                        checked={config.use_hybrid_search || false}
+                        onChange={(_, data: SwitchOnChangeData) => handleSwitchChange("use_hybrid_search", data.checked)}
+                        label={
+                            <InfoLabel
+                                label={"Use Hybrid Search"}
+                                info={<>Enable hybrid search combining text and vector search with Reciprocal Rank Fusion (RRF) for better relevance</>}
+                            />
+                        }
+                    />
+
+                    {config.use_hybrid_search && (
+                        <div className="input-group" style={{ marginLeft: "20px", paddingLeft: "10px", borderLeft: "2px solid var(--colorNeutralStroke2)" }}>
+                            <div className="input-group">
+                                <Label htmlFor="VectorWeightSlider">Vector Weight [{(config.vector_weight || 0.5).toFixed(1)}]</Label>
+                                <Slider
+                                    id="vectorWeightSlider"
+                                    className="weightSlider"
+                                    value={config.vector_weight || 0.5}
+                                    onChange={(_: React.ChangeEvent<HTMLInputElement>, data: SliderOnChangeData) => handleSliderChange("vector_weight", data.value)}
+                                    min={0.1}
+                                    max={1.0}
+                                    step={0.1}
+                                />
+                                <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
+                                    Balance between text search (lower values) and vector search (higher values)
+                                </Text>
+                            </div>
+
+                            <Switch
+                                id="enableVectorFiltersSwitch"
+                                checked={config.enable_vector_filters || false}
+                                onChange={(_, data: SwitchOnChangeData) => handleSwitchChange("enable_vector_filters", data.checked)}
+                                label={
+                                    <InfoLabel
+                                        label={"Enable Vector Filters"}
+                                        info={<>Apply filtering to vector queries for better performance with large datasets</>}
+                                    />
+                                }
+                            />
+
+                            {config.enable_vector_filters && (
+                                <div className="input-group" style={{ marginLeft: "20px" }}>
+                                    <Label htmlFor="VectorFilterModeDropdown">Vector Filter Mode</Label>
+                                    <Dropdown
+                                        id="vectorFilterModeDropdown"
+                                        value={config.vector_filter_mode || "preFilter"}
+                                        selectedOptions={[config.vector_filter_mode || "preFilter"]}
+                                        onOptionSelect={(_, data) => {
+                                            if (data.optionValue) {
+                                                handleDropdownChange("vector_filter_mode", data.optionValue);
+                                            }
+                                        }}
+                                    >
+                                        <Option value="preFilter">Pre-filter (Better recall, slower)</Option>
+                                        <Option value="postFilter">Post-filter (Faster, may return fewer results)</Option>
+                                    </Dropdown>
+                                    <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
+                                        Pre-filtering guarantees k results but is slower. Post-filtering is faster but may return fewer results.
+                                    </Text>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <Switch
+                        id="useScoringProfileSwitch"
+                        checked={config.use_scoring_profile || false}
+                        onChange={(_, data: SwitchOnChangeData) => handleSwitchChange("use_scoring_profile", data.checked)}
+                        label={
+                            <InfoLabel
+                                label={"Use Scoring Profile"}
+                                info={<>Apply scoring profile to boost relevance based on document freshness and type after semantic reranking</>}
+                            />
+                        }
+                    />
+
+                    {config.use_scoring_profile && (
+                        <div className="input-group" style={{ marginLeft: "20px", paddingLeft: "10px", borderLeft: "2px solid var(--colorNeutralStroke2)" }}>
+                            <Input
+                                placeholder="Enter scoring profile name (e.g., freshness_and_type_boost)"
+                                value={config.scoring_profile_name || ""}
+                                onChange={(_, data) => setConfig(prev => ({ ...prev, scoring_profile_name: data.value }))}
+                            />
+                            <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
+                                Name of the scoring profile defined in your search index
+                            </Text>
+                        </div>
+                    )}
+
+                    <Switch
+                        id="useQueryRewritingSwitch"
+                        checked={config.use_query_rewriting || false}
+                        onChange={(_, data: SwitchOnChangeData) => handleSwitchChange("use_query_rewriting", data.checked)}
+                        label={
+                            <InfoLabel
+                                label={"Use Query Rewriting"}
+                                info={<>Enable AI-powered query rewriting to improve search results by generating alternative query formulations</>}
+                            />
+                        }
+                    />
+
+                    {config.use_query_rewriting && (
+                        <div className="input-group" style={{ marginLeft: "20px", paddingLeft: "10px", borderLeft: "2px solid var(--colorNeutralStroke2)" }}>
+                            <Label htmlFor="QueryRewriteCountSlider">Query Rewrite Count [{config.query_rewrite_count || 3}]</Label>
+                            <Slider
+                                id="queryRewriteCountSlider"
+                                className="weightSlider"
+                                value={config.query_rewrite_count || 3}
+                                onChange={(_: React.ChangeEvent<HTMLInputElement>, data: SliderOnChangeData) => handleSliderChange("query_rewrite_count", data.value)}
+                                min={1}
+                                max={10}
+                                step={1}
+                            />
+                            <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
+                                Number of alternative query formulations to generate for better results
+                            </Text>
+                        </div>
+                    )}
                 </>
             )}
 

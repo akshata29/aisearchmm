@@ -74,13 +74,16 @@ class MultimodalRag(RagBase):
 
             grounding_retriever = self._get_grounding_retriever(search_config)
 
+            # Determine the appropriate title based on which retriever is being used
+            retriever_title = "Knowledge Agent Progress" if search_config["use_knowledge_agent"] else "Search Progress"
+
             # Create a processing step callback to forward messages from the retriever
             async def processing_step_callback(message: str):
                 await self._send_processing_step_message(
                     request_id,
                     response,
                     ProcessingStep(
-                        title="Knowledge Agent Progress",
+                        title=retriever_title,
                         type="info", 
                         description=message,
                         content={"message": message},
@@ -92,6 +95,20 @@ class MultimodalRag(RagBase):
             )
 
             references_count = len(grounding_results['references'])
+            
+            # Show search configuration details when using search grounding (not Knowledge Agent)
+            if not search_config["use_knowledge_agent"]:
+                search_strategy_info = self._get_search_strategy_info(search_config)
+                await self._send_processing_step_message(
+                    request_id,
+                    response,
+                    ProcessingStep(
+                        title="Search Strategy Configuration",
+                        type="code",
+                        description="Advanced search features being used",
+                        content=search_strategy_info,
+                    ),
+                )
             
             # Create a meaningful summary of what was retrieved
             if references_count > 0:
@@ -110,6 +127,21 @@ class MultimodalRag(RagBase):
                 description = f"Retrieved {references_count} document references"
                 if len(grounding_results['references']) > 3:
                     description += f" (showing first 3)"
+                
+                # Enhanced content for search grounding results
+                result_content = {
+                    "total_references": references_count,
+                    "content_preview": content_preview,
+                    "search_queries": grounding_results.get('search_queries', []),
+                }
+                
+                # Add search quality information if using search grounding
+                if not search_config["use_knowledge_agent"]:
+                    result_content["search_method"] = "Direct Search Index"
+                    result_content["features_used"] = self._get_features_used_summary(search_config)
+                else:
+                    result_content["search_method"] = "Knowledge Agent"
+                    result_content["full_results"] = grounding_results  # Include full results for debugging
                     
                 await self._send_processing_step_message(
                     request_id,
@@ -118,15 +150,21 @@ class MultimodalRag(RagBase):
                         title="Document References Retrieved",
                         type="code",
                         description=description,
-                        content={
-                            "total_references": references_count,
-                            "content_preview": content_preview,
-                            "search_queries": grounding_results.get('search_queries', []),
-                            "full_results": grounding_results  # Include full results for debugging
-                        },
+                        content=result_content,
                     ),
                 )
             else:
+                # Enhanced "no documents found" message for search grounding
+                no_docs_content = grounding_results.copy()
+                if not search_config["use_knowledge_agent"]:
+                    no_docs_content["search_strategy"] = self._get_search_strategy_info(search_config)
+                    no_docs_content["suggestions"] = [
+                        "Try adjusting vector weight if using hybrid search",
+                        "Consider enabling query rewriting for better recall",
+                        "Check if semantic ranker is properly configured",
+                        "Verify that documents exist in the search index"
+                    ]
+                
                 await self._send_processing_step_message(
                     request_id,
                     response,
@@ -134,7 +172,7 @@ class MultimodalRag(RagBase):
                         title="No documents found",
                         type="info",
                         description="No documents matched the search criteria",
-                        content=grounding_results,
+                        content=no_docs_content,
                     ),
                 )
 
@@ -197,6 +235,74 @@ class MultimodalRag(RagBase):
         else:
             logger.info("Using search index for grounding")
             return self.search_grounding
+
+    def _get_search_strategy_info(self, search_config: SearchConfig) -> dict:
+        """Generate detailed information about the search strategy being used."""
+        strategy_info = {
+            "search_type": "Advanced Search Index",
+            "features_enabled": [],
+            "configuration": {},
+            "performance_settings": {}
+        }
+        
+        # Check which features are enabled
+        if search_config.get("use_hybrid_search", False):
+            strategy_info["features_enabled"].append("Hybrid Search (Text + Vector with RRF)")
+            strategy_info["configuration"]["vector_weight"] = search_config.get("vector_weight", 0.5)
+            strategy_info["performance_settings"]["max_text_recall_size"] = search_config.get("max_text_recall_size", 1000)
+            
+            if search_config.get("enable_vector_filters", False):
+                strategy_info["features_enabled"].append(f"Vector Filtering ({search_config.get('vector_filter_mode', 'preFilter')})")
+                
+        if search_config.get("use_semantic_ranker", False):
+            strategy_info["features_enabled"].append("Semantic Ranking")
+            
+        if search_config.get("use_scoring_profile", False):
+            strategy_info["features_enabled"].append("Scoring Profile Boost")
+            strategy_info["configuration"]["scoring_profile"] = search_config.get("scoring_profile_name", "")
+            
+        if search_config.get("use_query_rewriting", False):
+            strategy_info["features_enabled"].append("AI Query Rewriting")
+            strategy_info["configuration"]["query_rewrite_count"] = search_config.get("query_rewrite_count", 3)
+            
+        # Set search type based on enabled features
+        if not strategy_info["features_enabled"]:
+            strategy_info["search_type"] = "Simple Text Search"
+        elif "Hybrid Search" in str(strategy_info["features_enabled"]):
+            strategy_info["search_type"] = "Hybrid Search with RRF"
+        elif "Semantic Ranking" in str(strategy_info["features_enabled"]):
+            strategy_info["search_type"] = "Semantic Text Search"
+            
+        strategy_info["configuration"]["chunk_count"] = search_config["chunk_count"]
+        
+        return strategy_info
+
+    def _get_features_used_summary(self, search_config: SearchConfig) -> list:
+        """Get a summary of which advanced search features were actually used."""
+        features = []
+        
+        if search_config.get("use_hybrid_search", False):
+            features.append(f"Hybrid Search (weight: {search_config.get('vector_weight', 0.5)})")
+            
+        if search_config.get("use_semantic_ranker", False):
+            features.append("Semantic Ranking")
+            
+        if search_config.get("use_scoring_profile", False):
+            profile_name = search_config.get("scoring_profile_name", "default")
+            features.append(f"Scoring Profile ({profile_name})")
+            
+        if search_config.get("use_query_rewriting", False):
+            count = search_config.get("query_rewrite_count", 3)
+            features.append(f"Query Rewriting ({count} variants)")
+            
+        if search_config.get("enable_vector_filters", False):
+            mode = search_config.get("vector_filter_mode", "preFilter")
+            features.append(f"Vector Filtering ({mode})")
+            
+        if not features:
+            features.append("Simple text search")
+            
+        return features
 
     async def prepare_llm_messages(
         self,

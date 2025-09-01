@@ -16,7 +16,19 @@ export default function useConfig() {
         query_complexity: "medium",
         preferred_document_types: [],
         enable_post_processing_boost: true,
-        additional_filters: []
+        additional_filters: [],
+        
+        // Hybrid Search Configuration defaults (when not using Knowledge Agent)
+        use_hybrid_search: false,
+        use_query_rewriting: false,
+        use_scoring_profile: false,
+        scoring_profile_name: "freshness_and_type_boost",
+        vector_weight: 0.5,
+        rrf_k_parameter: 60,
+        semantic_ranking_threshold: 2.0,
+        enable_vector_filters: false,
+        vector_filter_mode: "preFilter",
+        query_rewrite_count: 3
     });
 
     const [indexes, setIndexes] = useState<string[]>([]);

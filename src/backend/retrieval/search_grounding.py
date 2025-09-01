@@ -41,6 +41,12 @@ class SearchGroundingRetriever(GroundingRetriever):
 
         if processing_step_callback:
             await processing_step_callback(f"Generated search query: {query}")
+            
+        # Validate search configuration and show warnings
+        validation_warnings = self.data_model.validate_search_configuration(options)
+        if validation_warnings and processing_step_callback:
+            for warning in validation_warnings:
+                await processing_step_callback(f"⚠️ Configuration warning: {warning}")
 
         try:
             payload = self.data_model.create_search_payload(query, options)
@@ -52,20 +58,51 @@ class SearchGroundingRetriever(GroundingRetriever):
                 "select": payload["select"],
             }
             
-            # Only add vector_queries if it exists in the payload
-            if "vector_queries" in payload:
+            # Add vector queries if present (for hybrid search)
+            if "vector_queries" in payload and payload["vector_queries"]:
                 search_kwargs["vector_queries"] = payload["vector_queries"]
                 
             # Add semantic configuration if present
-            if "semantic_configuration_name" in payload:
+            if "semantic_configuration_name" in payload and payload["semantic_configuration_name"]:
                 search_kwargs["semantic_configuration_name"] = payload["semantic_configuration_name"]
+                
+            # Add scoring profile if present
+            if "scoring_profile" in payload and payload["scoring_profile"]:
+                search_kwargs["scoring_profile"] = payload["scoring_profile"]
+                
+            # Add vector filter mode if present
+            if "vector_filter_mode" in payload and payload["vector_filter_mode"]:
+                search_kwargs["vector_filter_mode"] = payload["vector_filter_mode"]
+                
+            # Add filter if present
+            if "filter" in payload and payload["filter"]:
+                search_kwargs["filter"] = payload["filter"]
 
             if processing_step_callback:
-                await processing_step_callback("Executing Azure AI Search query...")
+                search_type = "Hybrid" if "vector_queries" in search_kwargs else "Text-only"
+                semantic_info = " with Semantic Ranker" if "semantic_configuration_name" in search_kwargs else ""
+                scoring_info = f" using scoring profile '{search_kwargs.get('scoring_profile', '')}'" if "scoring_profile" in search_kwargs else ""
+                filter_info = f" (vector filter: {search_kwargs.get('vector_filter_mode', 'none')})" if "vector_filter_mode" in search_kwargs else ""
+                
+                await processing_step_callback(
+                    f"Executing {search_type} Azure AI Search{semantic_info}{scoring_info}{filter_info}..."
+                )
                 
             search_results = await self.search_client.search(**search_kwargs)
         except Exception as e:
-            raise Exception(f"Azure AI Search request failed: {str(e)}")
+            error_msg = str(e).lower()
+            
+            # Provide specific error messages for common issues
+            if "vector" in error_msg and "field" in error_msg:
+                raise Exception(f"Vector field not found in index. Ensure your index has a vector field named 'content_vector' or update the field name in the configuration. Original error: {str(e)}")
+            elif "semantic" in error_msg and "configuration" in error_msg:
+                raise Exception(f"Semantic configuration 'semantic-config' not found in index. Create a semantic configuration or disable semantic ranking. Original error: {str(e)}")
+            elif "scoring" in error_msg and "profile" in error_msg:
+                raise Exception(f"Scoring profile not found in index. Check the scoring profile name or disable scoring profiles. Original error: {str(e)}")
+            elif "query_rewrites" in error_msg or "rewrite" in error_msg:
+                raise Exception(f"Query rewriting not supported. This feature requires a recent API version and may not be available in all regions. Original error: {str(e)}")
+            else:
+                raise Exception(f"Azure AI Search request failed: {str(e)}")
 
         results_list = []
         async for result in search_results:
@@ -73,11 +110,58 @@ class SearchGroundingRetriever(GroundingRetriever):
 
         if processing_step_callback:
             await processing_step_callback(f"Found {len(results_list)} search results")
+            
+            # Provide detailed information about search results quality
+            if len(results_list) > 0:
+                # Check for different types of scores
+                score_types = []
+                semantic_scores = []
+                rrf_scores = []
+                boosted_scores = []
+                
+                for result in results_list:
+                    # Check for different score types
+                    if hasattr(result, '@search.rerankerScore'):
+                        semantic_scores.append(getattr(result, '@search.rerankerScore'))
+                    if hasattr(result, '@search.score'):
+                        rrf_scores.append(getattr(result, '@search.score'))
+                    if hasattr(result, '@search.rerankerBoostedScore'):
+                        boosted_scores.append(getattr(result, '@search.rerankerBoostedScore'))
+                
+                # Report on scoring information
+                if semantic_scores:
+                    avg_semantic = sum(semantic_scores) / len(semantic_scores)
+                    max_semantic = max(semantic_scores)
+                    score_types.append(f"semantic (avg: {avg_semantic:.2f}, max: {max_semantic:.2f})")
+                    
+                if rrf_scores and "vector_queries" in search_kwargs:
+                    avg_rrf = sum(rrf_scores) / len(rrf_scores)
+                    score_types.append(f"RRF fusion (avg: {avg_rrf:.2f})")
+                    
+                if boosted_scores:
+                    avg_boosted = sum(boosted_scores) / len(boosted_scores)
+                    score_types.append(f"scoring profile boosted (avg: {avg_boosted:.2f})")
+                    
+                if score_types:
+                    await processing_step_callback(f"Scores available: {', '.join(score_types)}")
 
         references = await self.data_model.collect_grounding_results(results_list)
 
         if processing_step_callback:
             await processing_step_callback(f"Processed {len(references)} references successfully")
+            
+            # Provide summary of content types retrieved
+            text_count = sum(1 for ref in references if ref.get("content_type") == "text")
+            image_count = sum(1 for ref in references if ref.get("content_type") == "image")
+            
+            content_summary = []
+            if text_count > 0:
+                content_summary.append(f"{text_count} text chunks")
+            if image_count > 0:
+                content_summary.append(f"{image_count} images")
+                
+            if content_summary:
+                await processing_step_callback(f"Retrieved: {', '.join(content_summary)}")
 
         return {
             "references": references,
@@ -87,24 +171,37 @@ class SearchGroundingRetriever(GroundingRetriever):
     async def _generate_search_query(
         self, user_message: str, chat_thread: List[Message]
     ) -> str:
+        """Generate an optimized search query, with potential enhancements for hybrid search."""
         try:
             messages = [
                 {"role": "user", "content": user_message},
                 *chat_thread,
             ]
 
+            # Enhanced system prompt for better query generation
+            enhanced_system_prompt = SEARCH_QUERY_SYSTEM_PROMPT + """
+
+For hybrid search scenarios, focus on:
+- Key concepts and entities rather than stop words
+- Technical terms and domain-specific vocabulary
+- Synonyms and related terminology that might appear in vector embeddings
+- Balance between specific terms (for text search) and conceptual meaning (for vector search)
+"""
+
             response = await self.openai_client.chat.completions.create(
                 model=self.chatcompletions_deployment_name,
                 messages=[
-                    {"role": "system", "content": SEARCH_QUERY_SYSTEM_PROMPT},
+                    {"role": "system", "content": enhanced_system_prompt},
                     *messages,
                 ],
+                temperature=0.1,  # Lower temperature for more consistent query generation
+                max_tokens=100    # Limit query length
             )
-            return response.choices[0].message.content
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            raise Exception(
-                f"Error while calling Azure OpenAI to generate a search query: {str(e)}"
-            )
+            logger.warning(f"Error while calling Azure OpenAI to generate search query, using original query: {str(e)}")
+            # Fallback to original user message if query generation fails
+            return user_message
 
     async def _get_image_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults

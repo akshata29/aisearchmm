@@ -2,7 +2,20 @@
     display: flex;
     gap: 10px;
     flex-direction: column;
+    padding-bottom: 20px; /* Add some padding at the bottom for better scrolling experience */
 }
+
 .weightSlider {
     width: 100%;
+}
+
+/* Ensure proper spacing for nested sections */
+.input-container .input-group {
+    margin-bottom: 12px;
+}
+
+/* Improve spacing for advanced search sections */
+.input-container > div[style*="margin-left"] {
+    margin-top: 8px;
+    margin-bottom: 12px;
 }

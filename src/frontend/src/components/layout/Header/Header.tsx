@@ -11,7 +11,7 @@ export const Header = ({ toggleMode, darkMode }: Props) => {
     return (
         <>
             <div className="header">
-                <Title2> Multimodal RAG + Azure AI Search</Title2>
+                <Title2> Multimodal RAG</Title2>
                 <div className="header-right">
                     <Switch
                         checked={darkMode}

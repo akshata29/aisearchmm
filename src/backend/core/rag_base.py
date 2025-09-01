@@ -57,6 +57,17 @@ class RagBase(ABC):
             preferred_document_types=config_dict.get("preferred_document_types", []),
             enable_post_processing_boost=config_dict.get("enable_post_processing_boost", True),
             additional_filters=config_dict.get("additional_filters", []),
+            # Hybrid Search Configuration (when not using Knowledge Agent)
+            use_hybrid_search=config_dict.get("use_hybrid_search", False),
+            use_query_rewriting=config_dict.get("use_query_rewriting", False),
+            use_scoring_profile=config_dict.get("use_scoring_profile", False),
+            scoring_profile_name=config_dict.get("scoring_profile_name", None),
+            vector_weight=config_dict.get("vector_weight", 0.5),
+            rrf_k_parameter=config_dict.get("rrf_k_parameter", 60),
+            semantic_ranking_threshold=config_dict.get("semantic_ranking_threshold", 2.0),
+            enable_vector_filters=config_dict.get("enable_vector_filters", False),
+            vector_filter_mode=config_dict.get("vector_filter_mode", "preFilter"),
+            query_rewrite_count=config_dict.get("query_rewrite_count", 3),
         )
         request_id = request_params.get("request_id", str(int(time.time())))
         response = await self._create_stream_response(request)

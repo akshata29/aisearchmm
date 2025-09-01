@@ -1,5 +1,5 @@
 .menu {
-    width: 350px !important;
+    width: 450px !important;
     display: flex;
     padding: 5px 0px 5px 15px;
     background-color: var(--colorNeutralBackground3);
@@ -8,12 +8,13 @@
     margin-bottom: 10px;
 }
 .menu-items {
-    width: 300px;
+    width: 400px;
     display: flex;
     flex-direction: column;
     padding: 20px 0px;
     justify-content: start;
     height: 100%;
+    overflow: hidden; /* Prevent overflow from propagating up */
 }
 .menu-item-recent {
     display: flex;
@@ -43,6 +44,41 @@
     margin-top: 15px;
     display: flex;
     flex-direction: column;
+    flex: 1;
+    overflow: hidden; /* Prevent the container from growing beyond bounds */
+}
+
+.menu-item-settings .custom-menu-item {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 8px; /* Space for scrollbar */
+    max-height: calc(100vh - 200px); /* Ensure it fits within viewport */
+}
+
+/* Modern scrollbar styling */
+.menu-item-settings .custom-menu-item::-webkit-scrollbar {
+    width: 6px;
+}
+
+.menu-item-settings .custom-menu-item::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+}
+
+.menu-item-settings .custom-menu-item::-webkit-scrollbar-thumb {
+    background: var(--colorNeutralStroke2);
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+.menu-item-settings .custom-menu-item::-webkit-scrollbar-thumb:hover {
+    background: var(--colorNeutralStroke1);
+}
+
+/* For Firefox */
+.menu-item-settings .custom-menu-item {
+    scrollbar-width: thin;
+    scrollbar-color: var(--colorNeutralStroke2) transparent;
 }
 .drop-down {
     width: 100%;
