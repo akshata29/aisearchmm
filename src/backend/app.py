@@ -144,6 +144,9 @@ async def create_search_index_if_not_exists(index_client: SearchIndexClient, ind
         SearchableField(name="content_text", type=SearchFieldDataType.String, searchable=True, filterable=True, hidden=False, sortable=True, facetable=True),
         SearchField(name="content_embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), vector_search_dimensions=1536, searchable=True, vector_search_profile_name="hnsw"),
         SimpleField(name="content_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+        # Field to link text content to source figures/images
+        SimpleField(name="source_figure_id", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+        SimpleField(name="related_image_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
         # New metadata fields
         SimpleField(name="published_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
         SearchableField(name="document_type", type=SearchFieldDataType.String, searchable=True, filterable=True, sortable=True, facetable=True),
@@ -317,6 +320,18 @@ async def create_app():
     # Create or align the search index schema before agent creation
     await create_search_index_if_not_exists(index_client, search_index_name, os.environ.get("KNOWLEDGE_AGENT_NAME"))
 
+    # Initialize blob service clients needed for image citation URLs
+    blob_service_client = BlobServiceClient(
+        account_url=os.environ["ARTIFACTS_STORAGE_ACCOUNT_URL"],
+        credential=tokenCredential,
+    )
+    artifacts_container_client = blob_service_client.get_container_client(
+        os.environ["ARTIFACTS_STORAGE_CONTAINER"]
+    )
+    samples_container_client = blob_service_client.get_container_client(
+        os.environ["SAMPLES_STORAGE_CONTAINER"]
+    )
+
     try:
         ka_retrieval_client = KnowledgeAgentRetrievalClient(
             agent_name=knowledge_agent_name,
@@ -334,6 +349,9 @@ async def create_app():
             openai_endpoint,
             openai_deployment_name,
             openai_model_name,
+            blob_service_client,
+            samples_container_client,
+            artifacts_container_client,  # Pass artifacts container for image access
         )
     except Exception as e:
         print(f"Warning: Knowledge agent initialization failed: {e}")
@@ -362,17 +380,9 @@ async def create_app():
         openai_client,
         data_model,
         openai_deployment_name,
-    )
-
-    blob_service_client = BlobServiceClient(
-        account_url=os.environ["ARTIFACTS_STORAGE_ACCOUNT_URL"],
-        credential=tokenCredential,
-    )
-    artifacts_container_client = blob_service_client.get_container_client(
-        os.environ["ARTIFACTS_STORAGE_CONTAINER"]
-    )
-    samples_container_client = blob_service_client.get_container_client(
-        os.environ["SAMPLES_STORAGE_CONTAINER"]
+        blob_service_client,
+        samples_container_client,
+        artifacts_container_client,
     )
 
     app = web.Application(middlewares=[cors_middleware])
@@ -391,7 +401,7 @@ async def create_app():
         print("Note: Using search grounding instead of knowledge agent due to initialization failure")
 
     citation_files_handler = CitationFilesHandler(
-        blob_service_client, samples_container_client
+        blob_service_client, samples_container_client, artifacts_container_client
     )
 
     # Initialize admin handler

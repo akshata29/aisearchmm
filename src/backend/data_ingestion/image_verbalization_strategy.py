@@ -243,6 +243,25 @@ class IndexerImgVerbalizationStrategy(Strategy):
                 sortable=False,
                 facetable=False,
             ),
+            # Field to link text content to source figures/images
+            SimpleField(
+                name="source_figure_id",
+                type=SearchFieldDataType.String,
+                searchable=False,
+                filterable=True,
+                hidden=False,
+                sortable=False,
+                facetable=False,
+            ),
+            SimpleField(
+                name="related_image_path",
+                type=SearchFieldDataType.String,
+                searchable=False,
+                filterable=True,
+                hidden=False,
+                sortable=False,
+                facetable=False,
+            ),
             ComplexField(
                 name="locationMetadata",
                 fields=[

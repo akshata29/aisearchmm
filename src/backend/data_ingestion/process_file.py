@@ -166,6 +166,9 @@ class ProcessFile:
                 SearchableField(name="content_text", type=SearchFieldDataType.String, searchable=True, filterable=True, hidden=False, sortable=True, facetable=True),
                 SearchField(name="content_embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), vector_search_dimensions=1536, searchable=True, vector_search_profile_name="hnsw"),
                 SimpleField(name="content_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+                # Field to link text content to source figures/images
+                SimpleField(name="source_figure_id", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+                SimpleField(name="related_image_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
                 # New metadata fields
                 SimpleField(name="published_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
                 SearchableField(name="document_type", type=SearchFieldDataType.String, searchable=True, filterable=True, sortable=True, facetable=True),
@@ -318,7 +321,7 @@ class ProcessFile:
         if chunking_strategy == "document_layout":
             # Document Layout approach: Use Document Intelligence's semantic structure
             print(f"Using Document Layout approach for semantic chunking.")
-            await self._process_with_document_layout(paragraphs, documents, file_name, document_metadata, page_dict, index_name)
+            await self._process_with_document_layout(paragraphs, documents, file_name, document_metadata, page_dict, index_name, images)
         else:
             # Custom approach: Traditional token-based chunking (existing logic)
             print(f"Using Custom chunking approach.")
@@ -386,6 +389,8 @@ class ProcessFile:
                     "content_text": image_description,  # Now contains rich, verbalized description
                     "content_embedding": image_content_embedding,  # Embedding of the detailed description
                     "content_path": blob_name,
+                    "source_figure_id": img.get("figure_id"),  # Link back to source figure
+                    "related_image_path": blob_name,  # Self-reference for image content
                     "published_date": document_metadata["published_date"],
                     "document_type": document_metadata["document_type"],
                     "locationMetadata": {
@@ -493,6 +498,7 @@ class ProcessFile:
                 )
 
                 info = {
+                    "figure_id": figure.id,
                     "blob_name": blob_name,
                     "page_number": figure.bounding_regions[0].page_number,
                     "boundingPolygons": self._format_polygon(
@@ -507,10 +513,11 @@ class ProcessFile:
                 continue
         return images_info
 
-    async def _process_with_document_layout(self, paragraphs, documents, file_name, document_metadata, page_dict, index_name):
+    async def _process_with_document_layout(self, paragraphs, documents, file_name, document_metadata, page_dict, index_name, images=None):
         """
         Process documents using Document Intelligence's semantic structure.
         Each paragraph/section becomes its own searchable unit with precise location data.
+        Links text content with related figures when detected.
         """
         total_paragraphs = len(paragraphs)
         processed_count = 0
@@ -532,6 +539,9 @@ class ProcessFile:
             for idx, chunk in enumerate(semantic_chunks):
                 document_id = str(uuid.uuid4())
                 
+                # Check if this content is figure-related and get linked image info
+                figure_info = self._find_related_figure(chunk, images or [])
+                
                 documents.append({
                     "content_id": document_id,
                     "text_document_id": str(uuid.uuid4()),
@@ -540,6 +550,8 @@ class ProcessFile:
                     "content_text": chunk["content"],
                     "content_embedding": text_embeddings[idx].embedding,
                     "content_path": f"{file_name}#page{chunk['page_number']}#{chunk.get('element_type', 'content')}",
+                    "source_figure_id": figure_info.get("figure_id") if figure_info else None,
+                    "related_image_path": figure_info.get("blob_name") if figure_info else None,
                     "published_date": document_metadata["published_date"],
                     "document_type": document_metadata["document_type"],
                     "locationMetadata": {
@@ -596,10 +608,13 @@ class ProcessFile:
                     documents.append({
                         "content_id": document_id,
                         "text_document_id": str(uuid.uuid4()),
+                        "image_document_id": None,
                         "content_text": chunk,
                         "content_embedding": text_embeddings[idx].embedding,
                         "document_title": file_name,
                         "content_path": f"{file_name}#page{chunk_metadata.get('pageNumber', 1)}",
+                        "source_figure_id": None,  # Not linking figures in custom chunking
+                        "related_image_path": None,
                         "published_date": document_metadata.get("published_date"),
                         "document_type": document_metadata.get("document_type"),
                         "locationMetadata": chunk_metadata
@@ -649,6 +664,8 @@ class ProcessFile:
                             "content_text": chunk,
                             "content_embedding": text_embeddings[idx].embedding,
                             "content_path": f"{file_name}#page{page_number}",
+                            "source_figure_id": None,  # Not linking figures in custom chunking
+                            "related_image_path": None,
                             "published_date": document_metadata["published_date"],
                             "document_type": document_metadata["document_type"],
                             "locationMetadata": chunk_metadata
@@ -1135,6 +1152,41 @@ Provide only the description without any preamble or explanation."""
             {"x": polygon[i], "y": polygon[i + 1]} for i in range(0, len(polygon), 2)
         ]
 
+    def _find_related_figure(self, chunk, images):
+        """
+        Determines if a text chunk is related to a figure/chart by analyzing:
+        1. Content keywords (Exhibit, Figure, Chart, Table, etc.)
+        2. Spatial proximity on the same page
+        3. Bounding box overlap or adjacency
+        """
+        if not images:
+            return None
+            
+        chunk_content = chunk.get("content", "").lower()
+        chunk_page = chunk.get("page_number")
+        
+        # Check for figure-related keywords
+        figure_keywords = [
+            "exhibit", "figure", "chart", "table", "diagram", 
+            "graph", "plot", "illustration", "image", "map",
+            "returns by country", "performance", "ranking"
+        ]
+        
+        has_figure_keywords = any(keyword in chunk_content for keyword in figure_keywords)
+        
+        if not has_figure_keywords:
+            return None
+            
+        # Find images on the same page
+        page_images = [img for img in images if img.get("page_number") == chunk_page]
+        
+        if not page_images:
+            return None
+            
+        # For now, return the first image on the same page with figure keywords
+        # TODO: Could be enhanced with spatial analysis of bounding boxes
+        return page_images[0]
+
     async def _index_documents(self, index_name, documents):
         """Indexes documents into Azure Cognitive Search."""
         try:
@@ -1196,6 +1248,9 @@ Provide only the description without any preamble or explanation."""
             SearchableField(name="content_text", type=SearchFieldDataType.String, searchable=True, filterable=True, hidden=False, sortable=True, facetable=True),
             SearchField(name="content_embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), vector_search_dimensions=1536, searchable=True, vector_search_profile_name="hnsw"),
             SimpleField(name="content_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+            # Field to link text content to source figures/images
+            SimpleField(name="source_figure_id", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+            SimpleField(name="related_image_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
             # New metadata fields
             SimpleField(name="published_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
             SearchableField(name="document_type", type=SearchFieldDataType.String, searchable=True, filterable=True, sortable=True, facetable=True),

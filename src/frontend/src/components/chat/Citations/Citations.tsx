@@ -1,7 +1,7 @@
 import React from "react";
 
 import { Caption1Strong, InteractionTag, InteractionTagPrimary } from "@fluentui/react-components";
-import { ImageCopy24Filled, Text12Filled } from "@fluentui/react-icons";
+import { ImageCopy24Filled, Text12Filled, ImageMultiple20Filled } from "@fluentui/react-icons";
 
 import { Citation } from "../../../api/models";
 import CitationViewer from "../CitationViewer/CitationViewer";
@@ -42,12 +42,12 @@ const Citations: React.FC<CitationsProps> = ({ imageCitations, textCitations, hi
                                         appearance={highlightedCitation === `${citation.content_id}` ? "brand" : "filled"}
                                     >
                                         <InteractionTagPrimary
-                                            secondaryText={`Page ${citation.locationMetadata.pageNumber}`}
+                                            secondaryText={`Page ${citation.locationMetadata?.pageNumber || 1}${citation.show_image ? " • Contains Figure" : ""}`}
                                             onClick={() => {
                                                 setCitationsView(true);
                                                 setSelectedCitation(citation);
                                             }}
-                                            icon={<Text12Filled />}
+                                            icon={citation.show_image ? <ImageMultiple20Filled /> : <Text12Filled />}
                                         >
                                             {truncateText(40, citation.text || citation.title)}
                                         </InteractionTagPrimary>
@@ -61,7 +61,7 @@ const Citations: React.FC<CitationsProps> = ({ imageCitations, textCitations, hi
                                         appearance={highlightedCitation === `${citation.content_id}` ? "brand" : "filled"}
                                     >
                                         <InteractionTagPrimary
-                                            secondaryText={`Page ${citation.locationMetadata.pageNumber}`}
+                                            secondaryText={citation.is_image ? `Image - Page ${citation.locationMetadata?.pageNumber || 1}` : `Page ${citation.locationMetadata?.pageNumber || 1}`}
                                             onClick={() => {
                                                 setCitationsView(true);
                                                 setSelectedCitation(citation);
@@ -76,7 +76,7 @@ const Citations: React.FC<CitationsProps> = ({ imageCitations, textCitations, hi
                     </>
                 )}
             </div>
-            {selectedCitation && <CitationViewer show={citationsView} toggle={() => setCitationsView(false)} citation={selectedCitation} />}
+            {selectedCitation && <CitationViewer show={citationsView} toggle={() => setCitationsView(false)} citation={selectedCitation} onClose={() => setCitationsView(false)} />}
         </>
     );
 };

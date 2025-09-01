@@ -18,11 +18,17 @@ class SearchGroundingRetriever(GroundingRetriever):
         openai_client: AsyncAzureOpenAI,
         data_model: DataModel,
         chatcompletions_deployment_name: str,
+        blob_service_client=None,
+        container_client=None,
+        artifacts_container_client=None,
     ):
         self.search_client = search_client
         self.openai_client = openai_client
         self.data_model = data_model
         self.chatcompletions_deployment_name = chatcompletions_deployment_name
+        self._blob_service_client = blob_service_client
+        self._container_client = container_client
+        self._artifacts_container_client = artifacts_container_client
 
     async def retrieve(
         self,
@@ -206,6 +212,59 @@ For hybrid search scenarios, focus on:
     async def _get_image_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults
     ) -> List[dict]:
+        """Enhanced image citation extraction with image URL generation."""
+        if not ref_ids:
+            return []
+            
+        from handlers.citation_file_handler import CitationFilesHandler
+        
+        try:
+            # Get blob service client for URL generation
+            blob_service_client = getattr(self, '_blob_service_client', None)
+            container_client = getattr(self, '_container_client', None)
+            artifacts_container_client = getattr(self, '_artifacts_container_client', None)
+            
+            if not blob_service_client or not container_client:
+                # Fallback to basic citation extraction without image URLs
+                return self._extract_basic_image_citations(ref_ids, grounding_results)
+                
+            citation_handler = CitationFilesHandler(blob_service_client, container_client, artifacts_container_client)
+            
+            references = {
+                grounding_result["ref_id"]: grounding_result
+                for grounding_result in grounding_results["references"]
+            }
+            
+            extracted_citations = []
+            for ref_id in ref_ids:
+                if ref_id in references:
+                    ref = references[ref_id]
+                    # Only process image citations
+                    if ref.get("content_type") == "image":
+                        citation = self.data_model.extract_citation(ref)
+                        
+                        # Generate image URL for this citation
+                        try:
+                            content_path = ref.get("content_path") or ref.get("content")
+                            if content_path:
+                                image_url = await citation_handler._get_file_url(content_path)
+                                citation["image_url"] = image_url
+                                citation["is_image"] = True
+                        except Exception as e:
+                            logger.warning(f"Could not generate image URL for {ref_id}: {e}")
+                            citation["is_image"] = True  # Still mark as image even if URL generation fails
+                            
+                        extracted_citations.append(citation)
+                        
+            return extracted_citations
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced image citation extraction: {e}")
+            # Fallback to basic extraction
+            return self._extract_basic_image_citations(ref_ids, grounding_results)
+            
+    def _extract_basic_image_citations(self, ref_ids: List[str], grounding_results: GroundingResults) -> List[dict]:
+        """Basic image citation extraction without image URLs."""
         return self._extract_citations(ref_ids, grounding_results)
 
     async def _get_text_citations(

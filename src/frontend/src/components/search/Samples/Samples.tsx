@@ -53,7 +53,7 @@ const Samples: React.FC<Props> = ({ handleQuery }) => {
             <div className="samples-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', marginBottom: '8px' }}>
                     <QuestionCircleRegular style={{ fontSize: '20px', color: 'var(--colorBrandForeground1)' }} />
-                    <Text as="h2" size={300} weight="semibold">
+                    <Text as="h2" size={500} weight="semibold">
                         Popular Questions
                     </Text>
                     <Text size={300} className="samples-subtitle">

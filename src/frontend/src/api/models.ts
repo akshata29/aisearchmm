@@ -46,6 +46,12 @@ export interface Citation {
         pageNumber: number;
         boundingPolygons: string;
     };
+    content_type?: string;
+    is_image?: boolean;
+    image_url?: string;
+    linked_image_path?: string;
+    source_figure_id?: string;
+    show_image?: boolean;
 }
 
 export interface Chat {

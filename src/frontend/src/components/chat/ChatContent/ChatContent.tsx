@@ -452,6 +452,47 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                                                                 {message.answerPartial?.answer}
                                                             </ReactMarkdown>
                                                             
+                                                            {/* Display inline images from citations */}
+                                                            {imageCitations.length > 0 && (
+                                                                <div className="inline-images-container" style={{ marginTop: "16px", marginBottom: "12px" }}>
+                                                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+                                                                        {imageCitations
+                                                                            .filter(citation => citation.image_url)
+                                                                            .map((citation, index) => (
+                                                                                <div key={`inline-image-${index}`} className="inline-image-item" style={{ 
+                                                                                    maxWidth: "300px", 
+                                                                                    borderRadius: "8px", 
+                                                                                    overflow: "hidden",
+                                                                                    border: "1px solid var(--colorNeutralStroke2)",
+                                                                                    backgroundColor: "var(--colorNeutralBackground1)"
+                                                                                }}>
+                                                                                    <img
+                                                                                        src={citation.image_url}
+                                                                                        alt={citation.title || "Referenced image"}
+                                                                                        style={{
+                                                                                            width: "100%",
+                                                                                            height: "auto",
+                                                                                            display: "block"
+                                                                                        }}
+                                                                                        onError={(e) => {
+                                                                                            const target = e.target as HTMLImageElement;
+                                                                                            target.style.display = 'none';
+                                                                                        }}
+                                                                                    />
+                                                                                    {citation.title && (
+                                                                                        <div style={{ padding: "8px" }}>
+                                                                                            <Caption1 style={{ color: "var(--colorNeutralForeground2)" }}>
+                                                                                                {citation.title}
+                                                                                            </Caption1>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            ))
+                                                                        }
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            
                                                             {/* Show processing steps suggestion when AI cannot answer */}
                                                             {message.answerPartial?.answer && 
                                                              message.answerPartial.answer.toLowerCase().includes("cannot answer") && 

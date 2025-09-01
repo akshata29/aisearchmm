@@ -152,6 +152,13 @@ class RagBase(ABC):
                             request_id, response, msg_id, stream_response.answer
                         )
                         complete_response = stream_response.model_dump()
+                        
+                # Enhance response with linked image information after streaming completes
+                if complete_response:
+                    complete_response = await self._enhance_response_with_linked_images(
+                        complete_response, grounding_results
+                    )
+                    
                 if len(complete_response.keys()) == 0:
                     raise ValueError("No response received from chat completion stream.")
 
@@ -172,6 +179,11 @@ class RagBase(ABC):
                         request_id, response, msg_id, chat_completion.answer
                     )
                     complete_response = chat_completion.model_dump()
+                    
+                    # Enhance response with linked image information
+                    complete_response = await self._enhance_response_with_linked_images(
+                        complete_response, grounding_results
+                    )
                 else:
                     raise ValueError("No response received from chat completion stream.")
                 
@@ -398,3 +410,44 @@ class RagBase(ABC):
     def attach_to_app(self, app, path):
         """Attaches the handler to the web app."""
         app.router.add_post(path, self._handle_request)
+
+    async def _enhance_response_with_linked_images(self, complete_response: dict, grounding_results: dict) -> dict:
+        """Enhance the LLM response with linked image information for text citations that reference figures."""
+        try:
+            # Get the text citations from the response
+            text_citation_ids = complete_response.get("text_citations", [])
+            if not text_citation_ids:
+                return complete_response
+            
+            # Create a reference lookup
+            references = {ref["ref_id"]: ref for ref in grounding_results.get("references", [])}
+            
+            # Collect linked images from text citations and add them to image_citations
+            existing_image_citations = complete_response.get("image_citations", [])
+            additional_image_citations = []
+            
+            for text_citation_id in text_citation_ids:
+                if text_citation_id in references:
+                    ref = references[text_citation_id]
+                    # Check if this text citation has a linked image
+                    if (ref.get("content_type") == "text" and 
+                        ref.get("has_linked_image") and 
+                        ref.get("linked_image_url")):
+                        
+                        # Add this as an image citation so the frontend can display it
+                        additional_image_citations.append(text_citation_id)
+            
+            # Add linked images to the response
+            if additional_image_citations:
+                enhanced_response = complete_response.copy()
+                # Add the linked image citation IDs to the existing image_citations
+                enhanced_response["image_citations"] = existing_image_citations + additional_image_citations
+                logger.info(f"Enhanced LLM response: added {len(additional_image_citations)} linked images to image_citations")
+                return enhanced_response
+            else:
+                logger.info("No linked images found in text citations")
+                return complete_response
+                
+        except Exception as e:
+            logger.error(f"Error enhancing response with linked images: {e}")
+            return complete_response

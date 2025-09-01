@@ -209,17 +209,63 @@ class DocumentPerChunkDataModel(DataModel):
         elif "pageNumber" not in location_metadata:
             location_metadata["pageNumber"] = 1  # Ensure pageNumber exists
             
-        return {
+        citation = {
             "locationMetadata": location_metadata,
-            "text": document["content_text"],
-            "title": document["document_title"],
-            "content_id": document.get("content_id") or document.get("id"),
+            "text": document["content"] if isinstance(document.get("content"), str) else document.get("content_text", ""),
+            "title": document.get("document_title") or document.get("metadata", {}).get("document_title", ""),
+            "content_id": document.get("content_id") or document.get("id") or document.get("ref_id"),
             "docId": (
-                document["text_document_id"]
-                if document["text_document_id"] is not None
-                else document["image_document_id"]
+                document.get("text_document_id")
+                if document.get("text_document_id") is not None
+                else document.get("image_document_id") or document.get("ref_id")
             ),
         }
+        
+        # Add content type and path information for images
+        if document.get("content_type") == "image" or document.get("image_document_id") is not None:
+            citation["content_type"] = "image"
+            citation["content_path"] = document.get("content_path") or document.get("content")
+            citation["is_image"] = True
+        else:
+            citation["content_type"] = "text"
+            citation["is_image"] = False
+            
+            # Check for linked image information - handle both Knowledge Agent and direct search results
+            has_linked_image = (
+                document.get("has_linked_image") or
+                document.get("source_figure_id") is not None or 
+                document.get("related_image_path") is not None or
+                document.get("metadata", {}).get("has_linked_image")
+            )
+            
+            if has_linked_image:
+                # Get image path from various possible locations
+                linked_image_path = (
+                    document.get("related_image_path") or 
+                    document.get("linked_image_path") or
+                    document.get("metadata", {}).get("related_image_path")
+                )
+                
+                # Get figure ID from various possible locations  
+                source_figure_id = (
+                    document.get("source_figure_id") or
+                    document.get("metadata", {}).get("source_figure_id")
+                )
+                
+                # Get image URL if available (from Knowledge Agent processing)
+                linked_image_url = document.get("linked_image_url")
+                
+                if linked_image_path or source_figure_id or linked_image_url:
+                    citation["linked_image_path"] = linked_image_path
+                    citation["source_figure_id"] = source_figure_id
+                    citation["linked_image_url"] = linked_image_url
+                    citation["show_image"] = True
+                else:
+                    citation["show_image"] = False
+            else:
+                citation["show_image"] = False
+            
+        return citation
 
     async def collect_grounding_results(
         self, search_results: List[dict]
@@ -228,19 +274,32 @@ class DocumentPerChunkDataModel(DataModel):
         for result in search_results:
             is_image = result.get("image_document_id") is not None
             is_text = result.get("text_document_id") is not None
+            
+            # Check if this text content is linked to a figure/image
+            has_linked_image = (
+                result.get("source_figure_id") is not None or 
+                result.get("related_image_path") is not None
+            )
 
             if is_text and result["content_text"] is not None:
-                collected_documents.append(
-                    {
+                text_doc = {
+                    "ref_id": result.get("content_id") or result.get("id"),
+                    "content": {
                         "ref_id": result.get("content_id") or result.get("id"),
-                        "content": {
-                            "ref_id": result.get("content_id") or result.get("id"),
-                            "text": result["content_text"],
-                        },
-                        "content_type": "text",
-                        **result,
-                    }
-                )
+                        "text": result["content_text"],
+                    },
+                    "content_type": "text",
+                    **result,
+                }
+                
+                # If this text content is linked to an image, add image citation info
+                if has_linked_image:
+                    text_doc["linked_image_path"] = result.get("related_image_path")
+                    text_doc["source_figure_id"] = result.get("source_figure_id")
+                    text_doc["has_linked_image"] = True
+                
+                collected_documents.append(text_doc)
+                    
             elif is_image and result["content_path"] is not None:
                 collected_documents.append(
                     {

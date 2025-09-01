@@ -41,6 +41,9 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         azure_openai_endpoint: str,
         azure_openai_searchagent_deployment: str,
         azure_openai_searchagent_model: str,
+        blob_service_client=None,
+        container_client=None,
+        artifacts_container_client=None,
     ):
         self.retrieval_agent_client = retrieval_agent_client
         self.search_client = search_client
@@ -48,6 +51,14 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         self.data_model = data_model
         self.index_name = index_name
         self.agent_name = agent_name
+        self._blob_service_client = blob_service_client
+        self._container_client = container_client
+        self._artifacts_container_client = artifacts_container_client  # For images/figures
+        
+        # Store parameters for potential agent recreation during retrieval
+        self.azure_openai_endpoint = azure_openai_endpoint
+        self.azure_openai_searchagent_deployment = azure_openai_searchagent_deployment
+        self.azure_openai_searchagent_model = azure_openai_searchagent_model
 
         self._create_retrieval_agent(
             agent_name,
@@ -96,6 +107,51 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                     )
                 )
             )
+        except Exception as e:
+            logger.error(f"Failed to create/update agent {agent_name}: {str(e)}")
+            raise
+
+    async def _create_retrieval_agent_async(
+        self,
+        agent_name,
+        azure_openai_endpoint,
+        azure_openai_searchagent_deployment,
+        azure_openai_searchagent_model,
+    ):
+        """Async version of agent creation for use during retrieval error handling."""
+        logger.info(f"Creating retrieval agent (async) for {agent_name}")
+        logger.info(f"OpenAI endpoint: {azure_openai_endpoint}")
+        logger.info(f"Deployment name: {azure_openai_searchagent_deployment}")
+        logger.info(f"Model name: {azure_openai_searchagent_model}")
+        
+        try:
+            await self.index_client.create_or_update_agent(
+                agent=AzureSearchKnowledgeAgent(
+                    name=agent_name,
+                    target_indexes=[
+                        KnowledgeAgentTargetIndex(
+                            index_name=self.index_name,
+                            default_include_reference_source_data=True,
+                            # Enhanced defaults for better quality
+                            default_reranker_threshold=2.0,  # Lower threshold for more results
+                            default_max_docs_for_reranker=100,  # Increase for better coverage
+                        )
+                    ],
+                    models=[
+                        KnowledgeAgentAzureOpenAIModel(
+                            azure_open_ai_parameters=AzureOpenAIVectorizerParameters(
+                                resource_url=azure_openai_endpoint,
+                                deployment_name=azure_openai_searchagent_deployment,
+                                api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+                                model_name=azure_openai_searchagent_model,
+                            )
+                        )
+                    ],
+                    # Set max output size for better performance (5K tokens as recommended)
+                    max_output_size=5000,
+                )
+            )
+            logger.info(f"Successfully created/updated knowledge agent '{agent_name}'")
         except Exception as e:
             logger.error(f"Failed to create/update agent {agent_name}: {str(e)}")
             raise
@@ -222,12 +278,50 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             logger.info(f"Target chunk count: {options.get('chunk_count', 10)}")
 
             # Execute agentic retrieval with enhanced parameters
-            result = await self.retrieval_agent_client.retrieve(
-                retrieval_request=KnowledgeAgentRetrievalRequest(
-                    messages=messages,
-                    target_index_params=[target_index_params]
+            try:
+                result = await self.retrieval_agent_client.retrieve(
+                    retrieval_request=KnowledgeAgentRetrievalRequest(
+                        messages=messages,
+                        target_index_params=[target_index_params]
+                    )
                 )
-            )
+            except Exception as retrieval_error:
+                # Check if the error is due to missing agent
+                error_str = str(retrieval_error).lower()
+                if "no agent with the name" in error_str or "agent with the name" in error_str:
+                    logger.warning(f"Knowledge agent '{self.agent_name}' not found. Creating agent...")
+                    
+                    if processing_step_callback:
+                        await processing_step_callback(f"Creating missing knowledge agent '{self.agent_name}'...")
+                    
+                    # Create the agent and retry
+                    try:
+                        await self._create_retrieval_agent_async(
+                            self.agent_name,
+                            self.azure_openai_endpoint,
+                            self.azure_openai_searchagent_deployment,
+                            self.azure_openai_searchagent_model,
+                        )
+                        
+                        logger.info(f"Successfully created knowledge agent '{self.agent_name}'. Retrying retrieval...")
+                        
+                        if processing_step_callback:
+                            await processing_step_callback(f"Agent created successfully. Retrying retrieval...")
+                        
+                        # Retry the retrieval request
+                        result = await self.retrieval_agent_client.retrieve(
+                            retrieval_request=KnowledgeAgentRetrievalRequest(
+                                messages=messages,
+                                target_index_params=[target_index_params]
+                            )
+                        )
+                        
+                    except Exception as create_error:
+                        logger.error(f"Failed to create knowledge agent '{self.agent_name}': {str(create_error)}")
+                        raise Exception(f"Knowledge agent '{self.agent_name}' not found and could not be created: {str(create_error)}") from retrieval_error
+                else:
+                    # Re-raise the original error if it's not agent-related
+                    raise retrieval_error
             
             # Debug the response structure
             self._debug_retrieval_response(result)
@@ -328,6 +422,20 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                         # Try to add document metadata if available
                         enhanced_reference["metadata"] = await self._fetch_document_metadata(doc_id, reference)
                         
+                        # If this reference has linked images, add the image information to the main reference
+                        if enhanced_reference["metadata"].get("has_linked_image"):
+                            enhanced_reference["source_figure_id"] = enhanced_reference["metadata"].get("source_figure_id")
+                            enhanced_reference["related_image_path"] = enhanced_reference["metadata"].get("related_image_path")
+                            enhanced_reference["has_linked_image"] = True
+                            
+                            # Generate the image URL if we have the path
+                            if enhanced_reference["metadata"].get("related_image_path"):
+                                enhanced_reference["linked_image_url"] = await self._generate_image_url(
+                                    enhanced_reference["metadata"]["related_image_path"]
+                                )
+                        else:
+                            enhanced_reference["has_linked_image"] = False
+                        
                         references.append(enhanced_reference)
             
             if processing_step_callback:
@@ -376,7 +484,11 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             "published_date": None,
             "document_type": None,
             "document_title": None,
-            "relevance_score": reference.get("score", 0)
+            "relevance_score": reference.get("score", 0),
+            # Initialize figure-related fields
+            "source_figure_id": None,
+            "related_image_path": None,
+            "has_linked_image": False
         }
         
         try:
@@ -385,9 +497,20 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             metadata.update({
                 "published_date": document.get("published_date"),
                 "document_type": document.get("document_type"),
-                "document_title": document.get("document_title")
+                "document_title": document.get("document_title"),
+                # Extract figure-related fields
+                "source_figure_id": document.get("source_figure_id"),
+                "related_image_path": document.get("related_image_path")
             })
-            logger.debug(f"Successfully fetched metadata for document {doc_id}")
+            
+            # Check if this content has linked images
+            has_linked_image = (
+                document.get("source_figure_id") is not None or 
+                document.get("related_image_path") is not None
+            )
+            metadata["has_linked_image"] = has_linked_image
+            
+            logger.debug(f"Successfully fetched metadata for document {doc_id}, has_linked_image: {has_linked_image}")
             
         except Exception as e:
             logger.warning(f"Could not fetch metadata for document {doc_id}: {e}")
@@ -402,8 +525,20 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                         metadata["document_type"] = reference["document_type"]
                     if "published_date" in reference:
                         metadata["published_date"] = reference["published_date"]
+                    # Extract figure-related fields from reference
+                    if "source_figure_id" in reference:
+                        metadata["source_figure_id"] = reference["source_figure_id"]
+                    if "related_image_path" in reference:
+                        metadata["related_image_path"] = reference["related_image_path"]
+                    
+                    # Check if this content has linked images based on fallback data
+                    has_linked_image = (
+                        reference.get("source_figure_id") is not None or 
+                        reference.get("related_image_path") is not None
+                    )
+                    metadata["has_linked_image"] = has_linked_image
                         
-                logger.debug(f"Using fallback metadata for document {doc_id}")
+                logger.debug(f"Using fallback metadata for document {doc_id}, has_linked_image: {metadata['has_linked_image']}")
             except Exception as fallback_error:
                 logger.debug(f"Could not extract fallback metadata: {fallback_error}")
         
@@ -510,7 +645,7 @@ class KnowledgeAgentGrounding(GroundingRetriever):
     async def _get_text_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults
     ) -> List[dict]:
-        """Enhanced text citation extraction with metadata."""
+        """Enhanced text citation extraction with metadata and linked image URL generation."""
         try:
             citations = []
             for ref_id in ref_ids:
@@ -524,6 +659,14 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                         "document_type": document.get("document_type"),
                         "enhanced_metadata": True
                     })
+                    
+                    # If this citation has a linked image, generate the image URL
+                    if citation.get("show_image") and citation.get("linked_image_path"):
+                        try:
+                            image_url = await self._generate_image_url(citation["linked_image_path"])
+                            citation["image_url"] = image_url
+                        except Exception as img_error:
+                            logger.warning(f"Could not generate image URL for {citation['linked_image_path']}: {img_error}")
                     
                     citations.append(citation)
                     
@@ -540,7 +683,8 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                         "locationMetadata": {"pageNumber": 1},  # Default page number
                         "published_date": None,
                         "document_type": None,
-                        "enhanced_metadata": False
+                        "enhanced_metadata": False,
+                        "show_image": False
                     }
                     
                     # Try to extract info from grounding results
@@ -571,8 +715,166 @@ class KnowledgeAgentGrounding(GroundingRetriever):
     async def _get_image_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults
     ) -> List[dict]:
-        """Enhanced image citation extraction (placeholder for future multimodal support)."""
-        return []
+        """Enhanced image citation extraction with support for linked images from text content."""
+        if not ref_ids:
+            return []
+        
+        # Debug log to understand the data structure
+        logger.debug(f"_get_image_citations: ref_ids={ref_ids}, grounding_results type={type(grounding_results)}")
+        logger.debug(f"grounding_results keys: {grounding_results.keys() if isinstance(grounding_results, dict) else 'not a dict'}")
+            
+        from handlers.citation_file_handler import CitationFilesHandler
+        from azure.storage.blob.aio import BlobServiceClient
+        
+        # Get blob service client for URL generation
+        # This assumes the container client is available in the data model or retriever
+        try:
+            # Try to get blob service from the search client's credential context
+            # This is a simplified approach - in production, you'd want to inject this dependency
+            blob_service_client = getattr(self, '_blob_service_client', None)
+            container_client = getattr(self, '_container_client', None)
+            artifacts_container_client = getattr(self, '_artifacts_container_client', None)
+            
+            if not blob_service_client or not container_client:
+                # Fallback to basic citation extraction without image URLs
+                return self._extract_basic_image_citations(ref_ids, grounding_results)
+                
+            citation_handler = CitationFilesHandler(blob_service_client, container_client, artifacts_container_client)
+            
+            try:
+                # Handle both dictionary and list formats for grounding_results
+                if isinstance(grounding_results, dict) and "references" in grounding_results:
+                    references_list = grounding_results["references"]
+                elif isinstance(grounding_results, list):
+                    # grounding_results is directly a list of references
+                    references_list = grounding_results
+                else:
+                    logger.error(f"Unexpected grounding_results format: {type(grounding_results)}")
+                    return []
+                
+                references = {
+                    grounding_result["ref_id"]: grounding_result
+                    for grounding_result in references_list
+                }
+            except Exception as e:
+                logger.error(f"Error creating references dict: {e}")
+                logger.error(f"grounding_results structure: {grounding_results}")
+                return []
+            
+            extracted_citations = []
+            for ref_id in ref_ids:
+                if ref_id in references:
+                    ref = references[ref_id]
+                    
+                    # Process actual image citations
+                    if ref.get("content_type") == "image":
+                        citation = self.data_model.extract_citation(ref)
+                        
+                        # Generate image URL for this citation
+                        try:
+                            content_path = ref.get("content_path") or ref.get("content")
+                            if content_path:
+                                image_url = await citation_handler._get_file_url(content_path)
+                                citation["image_url"] = image_url
+                                citation["is_image"] = True
+                        except Exception as e:
+                            logger.warning(f"Could not generate image URL for {ref_id}: {e}")
+                            citation["is_image"] = True  # Still mark as image even if URL generation fails
+                            
+                        extracted_citations.append(citation)
+                    
+                    # Process text citations that have linked images
+                    elif ref.get("content_type") == "text" and ref.get("has_linked_image"):
+                        citation = self.data_model.extract_citation(ref)
+                        
+                        # The citation already has the linked image URL from our processing
+                        if citation.get("show_image") and citation.get("linked_image_url"):
+                            # Create an image citation entry for the linked figure
+                            # Ensure locationMetadata has a complete structure
+                            original_location = citation.get("locationMetadata", {})
+                            safe_location_metadata = {
+                                "pageNumber": original_location.get("pageNumber", 1) if original_location else 1,
+                                "boundingPolygons": original_location.get("boundingPolygons", "") if original_location else ""
+                            }
+                            
+                            image_citation = {
+                                "ref_id": ref_id,
+                                "content_id": citation.get("content_id"),
+                                "title": citation.get("title"),
+                                "source_figure_id": citation.get("source_figure_id"),
+                                "image_url": citation.get("linked_image_url"),
+                                "is_image": True,
+                                "is_linked_from_text": True,  # Flag to indicate this came from text
+                                "text_ref_id": ref_id,  # Reference back to the text citation
+                                # Ensure locationMetadata is included for frontend compatibility
+                                "locationMetadata": safe_location_metadata,
+                                "docId": citation.get("docId")
+                            }
+                            extracted_citations.append(image_citation)
+                        
+            return extracted_citations
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced image citation extraction: {e}")
+            # Fallback to basic extraction
+            return self._extract_basic_image_citations(ref_ids, grounding_results)
+            
+    def _extract_basic_image_citations(self, ref_ids: List[str], grounding_results: GroundingResults) -> List[dict]:
+        """Basic image citation extraction without image URLs, supports both direct images and linked images."""
+        if not ref_ids:
+            return []
+        
+        try:
+            # Handle both dictionary and list formats for grounding_results
+            if isinstance(grounding_results, dict) and "references" in grounding_results:
+                references_list = grounding_results["references"]
+            elif isinstance(grounding_results, list):
+                # grounding_results is directly a list of references
+                references_list = grounding_results
+            else:
+                logger.error(f"Unexpected grounding_results format in basic extraction: {type(grounding_results)}")
+                return []
+            
+            references = {
+                grounding_result["ref_id"]: grounding_result
+                for grounding_result in references_list
+            }
+        except Exception as e:
+            logger.error(f"Error creating references dict in basic extraction: {e}")
+            logger.error(f"grounding_results structure: {grounding_results}")
+            return []
+        
+        extracted_citations = []
+        for ref_id in ref_ids:
+            if ref_id in references:
+                ref = references[ref_id]
+                
+                # Process actual image citations
+                if ref.get("content_type") == "image":
+                    citation = self.data_model.extract_citation(ref)
+                    citation["is_image"] = True
+                    extracted_citations.append(citation)
+                
+                # Process text citations that have linked images (basic version without URL generation)
+                elif ref.get("content_type") == "text" and ref.get("has_linked_image"):
+                    citation = self.data_model.extract_citation(ref)
+                    
+                    if citation.get("show_image"):
+                        # Create a basic image citation entry for the linked figure
+                        image_citation = {
+                            "ref_id": ref_id,
+                            "content_id": citation.get("content_id"),
+                            "title": citation.get("title"),
+                            "source_figure_id": citation.get("source_figure_id"),
+                            "linked_image_path": citation.get("linked_image_path"),
+                            "is_image": True,
+                            "is_linked_from_text": True,
+                            "text_ref_id": ref_id
+                        }
+                        # Note: No image_url in basic version - frontend will need to handle path-to-URL conversion
+                        extracted_citations.append(image_citation)
+                    
+        return extracted_citations
 
     def _get_search_queries(self, response: KnowledgeAgentRetrievalResponse) -> List[str]:
         """Extract search queries from the agentic retrieval response."""
@@ -630,6 +932,48 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         except Exception as e:
             logger.error(f"Error finding document ID for ref_id {ref_id}: {e}")
             return str(ref_id)  # Fallback to using ref_id as doc_id
+
+    async def _generate_image_url(self, blob_path: str) -> str:
+        """Generate a signed URL for an image blob path."""
+        try:
+            if not self._blob_service_client or not self._artifacts_container_client:
+                logger.warning("Blob service client or artifacts container client not available for image URL generation")
+                return ""
+                
+            # Clean up the blob path
+            clean_blob_path = blob_path.replace("\\", "/")
+            
+            # Get blob client from artifacts container (where images are stored)
+            blob_client = self._artifacts_container_client.get_blob_client(clean_blob_path)
+            
+            # Generate SAS token for the blob
+            start_time = datetime.utcnow()
+            expiry_time = start_time + timedelta(hours=1)
+            
+            # Create user delegation key
+            user_delegation_key = await self._blob_service_client.get_user_delegation_key(
+                key_start_time=start_time, 
+                key_expiry_time=expiry_time
+            )
+            
+            # Generate SAS token for artifacts container
+            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+            sas_token = generate_blob_sas(
+                account_name=blob_client.account_name or "",
+                container_name=self._artifacts_container_client.container_name,  # Use artifacts container
+                blob_name=clean_blob_path,
+                user_delegation_key=user_delegation_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.utcnow() + timedelta(minutes=60),
+            )
+            
+            signed_url = f"{blob_client.url}?{sas_token}"
+            logger.debug(f"Generated image URL for {blob_path}: {signed_url[:100]}...")
+            return signed_url
+            
+        except Exception as e:
+            logger.error(f"Error generating image URL for {blob_path}: {str(e)}")
+            return ""
 
     def get_retrieval_strategy_info(self) -> Dict[str, Any]:
         """Return information about the current retrieval strategy configuration."""

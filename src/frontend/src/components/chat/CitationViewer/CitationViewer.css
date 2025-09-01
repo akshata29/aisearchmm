@@ -26,3 +26,24 @@
     width: 100%;
     height: 100%;
 }
+
+.image-citation-container {
+    padding: 16px;
+    text-align: center;
+}
+
+.image-citation-container img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--colorNeutralStroke2);
+}
+
+.image-citation-fallback {
+    padding: 32px;
+    text-align: center;
+    background: var(--colorNeutralBackground2);
+    border-radius: 8px;
+    margin: 16px;
+}

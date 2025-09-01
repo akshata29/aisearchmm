@@ -10,8 +10,10 @@ class CitationFilesHandler:
         self,
         blob_service_client: BlobServiceClient,
         samples_container_client: ContainerClient,
+        artifacts_container_client: ContainerClient,
     ):
         self.container_client = samples_container_client
+        self.artifacts_container_client = artifacts_container_client  # For images/figures
         self.blob_service_client = blob_service_client
 
     async def handle(self, request):
@@ -23,7 +25,14 @@ class CitationFilesHandler:
             return web.json_response({"status": "error", "message": str(e)}, status=500)
 
     async def _get_file_url(self, blob_name: str):
-        blob_client = self.container_client.get_blob_client(
+        # Determine if this is an image/figure file (should use artifacts container)
+        # Images are typically in paths like "aimm/timestamp/figure_X.Y.png"
+        is_image = blob_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')) or 'figure_' in blob_name.lower()
+        
+        # Use appropriate container based on file type
+        container_client = self.artifacts_container_client if is_image else self.container_client
+        
+        blob_client = container_client.get_blob_client(
             blob_name.replace("\\", "/")
         )
         start_time = datetime.utcnow()
@@ -35,7 +44,7 @@ class CitationFilesHandler:
         )
         sas_token = generate_blob_sas(
             account_name=blob_client.account_name or "",
-            container_name=self.container_client.container_name,
+            container_name=container_client.container_name,  # Use the appropriate container
             blob_name=blob_name.replace("\\", "/"),
             user_delegation_key=user_delegation_key,
             permission=BlobSasPermissions(read=True),

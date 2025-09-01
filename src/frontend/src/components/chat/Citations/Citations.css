@@ -3,14 +3,30 @@
 }
 
 .citations {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 10px;
-    flex-wrap: wrap;
+    max-width: 100%;
+}
+
+/* Responsive grid adjustments for better column control */
+@media (min-width: 480px) and (max-width: 768px) {
+    .citations {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (min-width: 769px) {
+    .citations {
+        grid-template-columns: repeat(3, 1fr);
+    }
 }
 
 .citation-interaction {
     background-color: var(--colorNeutralBackground2);
     border: 1px solid var(--colorNeutralStroke2);
+    width: 100%;
+    min-width: 0; /* Allow shrinking below content width */
 }
 
 sup.citation-icon {

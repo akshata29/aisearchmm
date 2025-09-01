@@ -522,7 +522,7 @@
     justify-content: space-between;
     align-items: center;
     gap: 16px;
-    margin-bottom: 16px;
+    margin-bottom: 0px;
 }
 
 .primary-actions,
@@ -574,12 +574,12 @@
 }
 
 .citations-divider {
-    margin: 16px 0 !important;
+    margin: 8px 0 !important;
     opacity: 0.5;
 }
 
 .citations-section {
-    margin-top: 8px;
+    margin-top: 4px;
 }
 
 /* Error and Info Messages */
