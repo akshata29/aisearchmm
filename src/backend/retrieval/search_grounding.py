@@ -153,24 +153,64 @@ class SearchGroundingRetriever(GroundingRetriever):
 
         references = await self.data_model.collect_grounding_results(results_list)
 
+        # Enhance references with additional metadata, similar to knowledge agent
+        enhanced_references = []
+        for reference in references:
+            if reference.get("content_type") == "text":
+                # Try to get enhanced metadata for text references
+                try:
+                    ref_id = reference.get("ref_id")
+                    if ref_id:
+                        metadata = await self._fetch_document_metadata(ref_id, reference)
+                        
+                        # Update the reference with enhanced metadata
+                        reference["metadata"] = metadata
+                        
+                        # If this reference has linked images, add the image information to the main reference
+                        if metadata.get("has_linked_image"):
+                            reference["source_figure_id"] = metadata.get("source_figure_id")
+                            reference["related_image_path"] = metadata.get("related_image_path")
+                            reference["has_linked_image"] = True
+                            
+                            # Generate the image URL if we have the path
+                            if metadata.get("related_image_path"):
+                                try:
+                                    reference["linked_image_url"] = await self._generate_image_url(
+                                        metadata["related_image_path"]
+                                    )
+                                except Exception as url_error:
+                                    logger.warning(f"Could not generate image URL for {metadata['related_image_path']}: {url_error}")
+                        else:
+                            reference["has_linked_image"] = False
+                            
+                except Exception as e:
+                    logger.warning(f"Could not enhance metadata for reference {reference.get('ref_id')}: {e}")
+                    # Set default values if enhancement fails
+                    reference["has_linked_image"] = False
+            
+            enhanced_references.append(reference)
+
         if processing_step_callback:
-            await processing_step_callback(f"Processed {len(references)} references successfully")
+            await processing_step_callback(f"Processed {len(enhanced_references)} references successfully")
             
             # Provide summary of content types retrieved
-            text_count = sum(1 for ref in references if ref.get("content_type") == "text")
-            image_count = sum(1 for ref in references if ref.get("content_type") == "image")
+            text_count = sum(1 for ref in enhanced_references if ref.get("content_type") == "text")
+            image_count = sum(1 for ref in enhanced_references if ref.get("content_type") == "image")
+            linked_image_count = sum(1 for ref in enhanced_references if ref.get("has_linked_image"))
             
             content_summary = []
             if text_count > 0:
                 content_summary.append(f"{text_count} text chunks")
             if image_count > 0:
                 content_summary.append(f"{image_count} images")
+            if linked_image_count > 0:
+                content_summary.append(f"{linked_image_count} with linked images")
                 
             if content_summary:
                 await processing_step_callback(f"Retrieved: {', '.join(content_summary)}")
 
         return {
-            "references": references,
+            "references": enhanced_references,
             "search_queries": [query],
         }
 
@@ -212,7 +252,7 @@ For hybrid search scenarios, focus on:
     async def _get_image_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults
     ) -> List[dict]:
-        """Enhanced image citation extraction with image URL generation."""
+        """Enhanced image citation extraction with support for linked images from text content."""
         if not ref_ids:
             return []
             
@@ -230,16 +270,32 @@ For hybrid search scenarios, focus on:
                 
             citation_handler = CitationFilesHandler(blob_service_client, container_client, artifacts_container_client)
             
-            references = {
-                grounding_result["ref_id"]: grounding_result
-                for grounding_result in grounding_results["references"]
-            }
+            try:
+                # Handle both dictionary and list formats for grounding_results
+                if isinstance(grounding_results, dict) and "references" in grounding_results:
+                    references_list = grounding_results["references"]
+                elif isinstance(grounding_results, list):
+                    # grounding_results is directly a list of references
+                    references_list = grounding_results
+                else:
+                    logger.error(f"Unexpected grounding_results format: {type(grounding_results)}")
+                    return []
+                
+                references = {
+                    grounding_result["ref_id"]: grounding_result
+                    for grounding_result in references_list
+                }
+            except Exception as e:
+                logger.error(f"Error creating references dict: {e}")
+                logger.error(f"grounding_results structure: {grounding_results}")
+                return []
             
             extracted_citations = []
             for ref_id in ref_ids:
                 if ref_id in references:
                     ref = references[ref_id]
-                    # Only process image citations
+                    
+                    # Process actual image citations
                     if ref.get("content_type") == "image":
                         citation = self.data_model.extract_citation(ref)
                         
@@ -255,6 +311,46 @@ For hybrid search scenarios, focus on:
                             citation["is_image"] = True  # Still mark as image even if URL generation fails
                             
                         extracted_citations.append(citation)
+                    
+                    # Process text citations that have linked images
+                    elif ref.get("content_type") == "text" and ref.get("has_linked_image"):
+                        citation = self.data_model.extract_citation(ref)
+                        
+                        # Check if this text citation has a linked image and generate the URL if needed
+                        if citation.get("show_image"):
+                            linked_image_url = citation.get("linked_image_url")
+                            
+                            # If we don't have the URL yet, generate it from the path
+                            if not linked_image_url and citation.get("linked_image_path"):
+                                try:
+                                    linked_image_url = await self._generate_image_url(citation["linked_image_path"])
+                                except Exception as url_error:
+                                    logger.warning(f"Could not generate image URL for {citation['linked_image_path']}: {url_error}")
+                                    linked_image_url = None
+                            
+                            # Create an image citation entry for the linked figure if we have a URL
+                            if linked_image_url:
+                                # Ensure locationMetadata has a complete structure
+                                original_location = citation.get("locationMetadata", {})
+                                safe_location_metadata = {
+                                    "pageNumber": original_location.get("pageNumber", 1) if original_location else 1,
+                                    "boundingPolygons": original_location.get("boundingPolygons", "") if original_location else ""
+                                }
+                                
+                                image_citation = {
+                                    "ref_id": ref_id,
+                                    "content_id": citation.get("content_id"),
+                                    "title": citation.get("title"),
+                                    "source_figure_id": citation.get("source_figure_id"),
+                                    "image_url": linked_image_url,
+                                    "is_image": True,
+                                    "is_linked_from_text": True,  # Flag to indicate this came from text
+                                    "text_ref_id": ref_id,  # Reference back to the text citation
+                                    # Ensure locationMetadata is included for frontend compatibility
+                                    "locationMetadata": safe_location_metadata,
+                                    "docId": citation.get("docId")
+                                }
+                                extracted_citations.append(image_citation)
                         
             return extracted_citations
             
@@ -264,13 +360,215 @@ For hybrid search scenarios, focus on:
             return self._extract_basic_image_citations(ref_ids, grounding_results)
             
     def _extract_basic_image_citations(self, ref_ids: List[str], grounding_results: GroundingResults) -> List[dict]:
-        """Basic image citation extraction without image URLs."""
-        return self._extract_citations(ref_ids, grounding_results)
+        """Basic image citation extraction without image URLs, supports both direct images and linked images."""
+        if not ref_ids:
+            return []
+        
+        try:
+            # Handle both dictionary and list formats for grounding_results
+            if isinstance(grounding_results, dict) and "references" in grounding_results:
+                references_list = grounding_results["references"]
+            elif isinstance(grounding_results, list):
+                # grounding_results is directly a list of references
+                references_list = grounding_results
+            else:
+                logger.error(f"Unexpected grounding_results format in basic extraction: {type(grounding_results)}")
+                return []
+            
+            references = {
+                grounding_result["ref_id"]: grounding_result
+                for grounding_result in references_list
+            }
+        except Exception as e:
+            logger.error(f"Error creating references dict in basic extraction: {e}")
+            logger.error(f"grounding_results structure: {grounding_results}")
+            return []
+        
+        extracted_citations = []
+        for ref_id in ref_ids:
+            if ref_id in references:
+                ref = references[ref_id]
+                
+                # Process actual image citations
+                if ref.get("content_type") == "image":
+                    citation = self.data_model.extract_citation(ref)
+                    citation["is_image"] = True
+                    extracted_citations.append(citation)
+                
+                # Process text citations that have linked images (basic version without URL generation)
+                elif ref.get("content_type") == "text" and ref.get("has_linked_image"):
+                    citation = self.data_model.extract_citation(ref)
+                    
+                    if citation.get("show_image"):
+                        # Create a basic image citation entry for the linked figure
+                        # Ensure locationMetadata has a complete structure
+                        original_location = citation.get("locationMetadata", {})
+                        safe_location_metadata = {
+                            "pageNumber": original_location.get("pageNumber", 1) if original_location else 1,
+                            "boundingPolygons": original_location.get("boundingPolygons", "") if original_location else ""
+                        }
+                        
+                        image_citation = {
+                            "ref_id": ref_id,
+                            "content_id": citation.get("content_id"),
+                            "title": citation.get("title"),
+                            "source_figure_id": citation.get("source_figure_id"),
+                            "linked_image_path": citation.get("linked_image_path"),
+                            "is_image": True,
+                            "is_linked_from_text": True,
+                            "text_ref_id": ref_id,
+                            # Ensure locationMetadata is included for frontend compatibility
+                            "locationMetadata": safe_location_metadata,
+                            "docId": citation.get("docId")
+                        }
+                        # Note: No image_url in basic version - frontend will need to handle path-to-URL conversion
+                        extracted_citations.append(image_citation)
+                    
+        return extracted_citations
+
+    async def _generate_image_url(self, blob_path: str) -> str:
+        """Generate a signed URL for an image blob path."""
+        from handlers.citation_file_handler import CitationFilesHandler
+        
+        # Get blob service client for URL generation
+        blob_service_client = getattr(self, '_blob_service_client', None)
+        container_client = getattr(self, '_container_client', None)
+        artifacts_container_client = getattr(self, '_artifacts_container_client', None)
+        
+        if not blob_service_client or not artifacts_container_client:
+            raise Exception("Blob service client or artifacts container client not available for image URL generation")
+        
+        citation_handler = CitationFilesHandler(blob_service_client, container_client, artifacts_container_client)
+        return await citation_handler._get_file_url(blob_path)
+
+    async def _fetch_document_metadata(self, doc_id: str, reference: dict) -> dict:
+        """Safely fetch document metadata with fallbacks, including linked image information."""
+        metadata = {
+            "published_date": None,
+            "document_type": None,
+            "document_title": None,
+            "relevance_score": reference.get("score", 0),
+            # Initialize figure-related fields
+            "source_figure_id": None,
+            "related_image_path": None,
+            "has_linked_image": False
+        }
+        
+        try:
+            # Try to fetch the full document
+            document = await self.search_client.get_document(doc_id)
+            metadata.update({
+                "published_date": document.get("published_date"),
+                "document_type": document.get("document_type"),
+                "document_title": document.get("document_title"),
+                # Extract figure-related fields
+                "source_figure_id": document.get("source_figure_id"),
+                "related_image_path": document.get("related_image_path")
+            })
+            
+            # Check if this content has linked images
+            has_linked_image = (
+                document.get("source_figure_id") is not None or 
+                document.get("related_image_path") is not None
+            )
+            metadata["has_linked_image"] = has_linked_image
+            
+            logger.debug(f"Successfully fetched metadata for document {doc_id}, has_linked_image: {has_linked_image}")
+            
+        except Exception as e:
+            logger.warning(f"Could not fetch metadata for document {doc_id}: {e}")
+            
+            # Try to extract metadata from the reference content itself
+            try:
+                if isinstance(reference, dict):
+                    content = reference.get("content", {})
+                    if isinstance(content, dict):
+                        has_linked_image = (
+                            content.get("source_figure_id") is not None or 
+                            content.get("related_image_path") is not None
+                        )
+                        metadata["has_linked_image"] = has_linked_image
+                        metadata.update({
+                            "source_figure_id": content.get("source_figure_id"),
+                            "related_image_path": content.get("related_image_path")
+                        })
+                        
+                logger.debug(f"Using fallback metadata for document {doc_id}, has_linked_image: {metadata['has_linked_image']}")
+                        
+            except Exception as fallback_error:
+                logger.debug(f"Could not extract fallback metadata: {fallback_error}")
+        
+        return metadata
 
     async def _get_text_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults
     ) -> List[dict]:
-        return self._extract_citations(ref_ids, grounding_results)
+        """Enhanced text citation extraction with metadata and linked image URL generation."""
+        try:
+            citations = []
+            for ref_id in ref_ids:
+                try:
+                    document = await self.search_client.get_document(ref_id)
+                    citation = self.data_model.extract_citation(document)
+                    
+                    # Add enhanced metadata to citations
+                    citation.update({
+                        "published_date": document.get("published_date"),
+                        "document_type": document.get("document_type"),
+                        "enhanced_metadata": True
+                    })
+                    
+                    # If this citation has a linked image, generate the image URL
+                    if citation.get("show_image") and citation.get("linked_image_path"):
+                        try:
+                            image_url = await self._generate_image_url(citation["linked_image_path"])
+                            citation["image_url"] = image_url
+                        except Exception as img_error:
+                            logger.warning(f"Could not generate image URL for {citation['linked_image_path']}: {img_error}")
+                    
+                    citations.append(citation)
+                    
+                except Exception as doc_error:
+                    logger.warning(f"Could not fetch document {ref_id} for citation: {doc_error}")
+                    
+                    # Create a minimal citation from available data
+                    minimal_citation = {
+                        "ref_id": ref_id,
+                        "text": f"Reference {ref_id}",
+                        "title": f"Document {ref_id}",
+                        "content_id": ref_id,
+                        "docId": ref_id,
+                        "locationMetadata": {"pageNumber": 1},  # Default page number
+                        "published_date": None,
+                        "document_type": None,
+                        "enhanced_metadata": False,
+                        "show_image": False
+                    }
+                    
+                    # Try to extract info from grounding results
+                    try:
+                        for ref in grounding_results.get("references", []):
+                            if ref.get("ref_id") == ref_id:
+                                ref_metadata = ref.get("metadata", {})
+                                minimal_citation.update({
+                                    "published_date": ref_metadata.get("published_date"),
+                                    "document_type": ref_metadata.get("document_type"),
+                                    "title": ref_metadata.get("document_title", f"Document {ref_id}"),
+                                })
+                                if ref.get("content", {}).get("text"):
+                                    minimal_citation["text"] = ref["content"]["text"][:200] + "..."
+                                break
+                    except Exception as fallback_error:
+                        logger.debug(f"Could not extract fallback citation data: {fallback_error}")
+                    
+                    citations.append(minimal_citation)
+                    
+            return citations
+            
+        except Exception as e:
+            logger.error(f"Error creating enhanced text citations: {str(e)}")
+            # Return empty list rather than raising to allow the response to continue
+            return []
 
     def _extract_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults
