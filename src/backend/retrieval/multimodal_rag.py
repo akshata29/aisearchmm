@@ -134,7 +134,7 @@ class MultimodalRag(RagBase):
                     collected_documents.append(
                         {
                             "type": "text",
-                            "text": f"The image below has the ID: [{doc['ref_id']}]",
+                            "text": f"IMAGE REFERENCE with ID [{doc['ref_id']}]: The following image contains relevant information.",
                         }
                     )
                     # blob path differs if index was created through self script in repo or from the portal mulitmodal RAG wizard

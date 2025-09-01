@@ -231,6 +231,13 @@ class SimpleDocumentUploadHandler:
         try:
             data = await request.json()
             upload_id = data.get('upload_id')
+            published_date = data.get('published_date')  # Extract metadata
+            document_type = data.get('document_type')    # Extract metadata
+            
+            # Extract chunking parameters with defaults
+            chunk_size = data.get('chunk_size', 500)
+            chunk_overlap = data.get('chunk_overlap', 50)
+            output_format = data.get('output_format', 'markdown')  # 'markdown' or 'text'
             
             if not upload_id or upload_id not in self.processing_status:
                 return web.json_response(
@@ -251,6 +258,18 @@ class SimpleDocumentUploadHandler:
                     {"error": "File not found"}, 
                     status=400
                 )
+
+            # Store metadata and processing options in processing status for use in background processing
+            self.processing_status[upload_id]["metadata"] = {
+                "published_date": published_date,
+                "document_type": document_type
+            }
+            
+            self.processing_status[upload_id]["processing_options"] = {
+                "chunk_size": chunk_size,
+                "chunk_overlap": chunk_overlap,
+                "output_format": output_format
+            }
 
             # Update status
             self.processing_status[upload_id]["status"] = "processing"
@@ -356,11 +375,26 @@ class SimpleDocumentUploadHandler:
 
             progress_processor = ProgressTrackingProcessor(processor, self, upload_id)
 
-            # Process the file
+            # Extract metadata and processing options from processing status
+            metadata = self.processing_status[upload_id].get("metadata", {})
+            published_date = metadata.get("published_date")
+            document_type = metadata.get("document_type")
+            
+            processing_options = self.processing_status[upload_id].get("processing_options", {})
+            chunk_size = processing_options.get("chunk_size", 500)
+            chunk_overlap = processing_options.get("chunk_overlap", 50)
+            output_format = processing_options.get("output_format", "markdown")
+
+            # Process the file with metadata and processing options
             await processor.process_file(
                 file_bytes=file_bytes,
                 file_name=filename,
-                index_name=os.environ["SEARCH_INDEX_NAME"]
+                index_name=os.environ["SEARCH_INDEX_NAME"],
+                published_date=published_date,
+                document_type=document_type,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                output_format=output_format
             )
 
             # Update final status

@@ -878,3 +878,174 @@ html, body, #root {
     max-width: 100% !important;
     overflow: visible !important;
 }
+
+/* Metadata Form Styles */
+.metadata-form {
+    margin-top: 24px;
+    padding: 20px;
+    background: var(--colorNeutralBackground2);
+    border-radius: 8px;
+    border: 1px solid var(--colorNeutralStroke2);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.form-section {
+    border-top: 1px solid var(--colorNeutralStroke2);
+    padding-top: 16px;
+    margin-top: 8px;
+}
+
+.form-section .fui-Title2 {
+    color: var(--colorNeutralForeground2);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+/* Two-column grid layout */
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Span across both columns for specific fields */
+.form-row-span-2 {
+    grid-column: span 2;
+}
+
+/* Enhanced form field styling */
+.form-row .fui-Field__hint {
+    font-size: 12px;
+    color: var(--colorNeutralForeground3);
+    margin-top: 4px;
+    line-height: 1.3;
+}
+
+/* Improved spacing for metadata form */
+.metadata-form {
+    padding: 20px 0;
+}
+
+.metadata-form .form-grid {
+    margin-bottom: 16px;
+}
+
+/* Mobile responsive - single column on small screens */
+@media (max-width: 768px) {
+    .form-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .form-row-span-2 {
+        grid-column: span 1;
+    }
+    
+    .metadata-form {
+        padding: 16px 0;
+    }
+}
+
+.form-row .fui-Field {
+    width: 100%;
+}
+
+.form-row .fui-Field__label {
+    font-weight: 600;
+    color: var(--colorNeutralForeground1);
+    margin-bottom: 6px;
+}
+
+.form-row .fui-Input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--colorNeutralStroke2);
+    background: var(--colorNeutralBackground1);
+    color: var(--colorNeutralForeground1);
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.form-row .fui-Input:focus {
+    border-color: var(--colorBrandStroke1);
+    box-shadow: 0 0 0 2px var(--colorBrandBackground2);
+    outline: none;
+}
+
+.form-row .fui-Input:disabled {
+    background: var(--colorNeutralBackground3);
+    color: var(--colorNeutralForeground3);
+    cursor: not-allowed;
+}
+
+.form-row .fui-Dropdown {
+    width: 100%;
+}
+
+.form-row .fui-Dropdown__button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--colorNeutralStroke2);
+    background: var(--colorNeutralBackground1);
+    color: var(--colorNeutralForeground1);
+    font-size: 14px;
+    text-align: left;
+    transition: all 0.2s ease;
+}
+
+.form-row .fui-Dropdown__button:hover {
+    border-color: var(--colorNeutralStroke1);
+    background: var(--colorNeutralBackground1Hover);
+}
+
+.form-row .fui-Dropdown__button:focus {
+    border-color: var(--colorBrandStroke1);
+    box-shadow: 0 0 0 2px var(--colorBrandBackground2);
+    outline: none;
+}
+
+.form-row .fui-Dropdown__button:disabled {
+    background: var(--colorNeutralBackground3);
+    color: var(--colorNeutralForeground3);
+    cursor: not-allowed;
+}
+
+/* Responsive adjustments for metadata form */
+@media (max-width: 768px) {
+    .metadata-form {
+        padding: 16px;
+        gap: 16px;
+        margin-top: 16px;
+    }
+    
+    .form-row .fui-Input,
+    .form-row .fui-Dropdown__button {
+        padding: 10px;
+        font-size: 13px;
+    }
+}
+
+@media (max-width: 480px) {
+    .metadata-form {
+        padding: 12px;
+        gap: 12px;
+        margin-top: 12px;
+    }
+    
+    .form-row .fui-Input,
+    .form-row .fui-Dropdown__button {
+        padding: 8px;
+        font-size: 12px;
+    }
+}

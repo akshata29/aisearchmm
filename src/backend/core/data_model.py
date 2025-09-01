@@ -46,7 +46,7 @@ class DocumentPerChunkDataModel(DataModel):
         payload = {
             "search": query,
             "top": search_config["chunk_count"],
-            "select": "content_id, content_text, document_title, text_document_id, image_document_id, locationMetadata, content_path",
+            "select": "content_id, content_text, document_title, text_document_id, image_document_id, locationMetadata, content_path, published_date, document_type",
             "query_type": query_type,
         }
 

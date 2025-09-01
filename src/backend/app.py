@@ -35,6 +35,13 @@ from azure.search.documents.indexes.models import (
     ComplexField,
     AzureOpenAIVectorizer,
     AzureOpenAIVectorizerParameters,
+    ScoringProfile,
+    ScoringFunction,
+    FreshnessScoringFunction,
+    FreshnessScoringParameters,
+    TagScoringFunction,
+    TagScoringParameters,
+    TextWeights,
 )
 from azure.search.documents.indexes.aio import SearchIndexClient
 from azure.search.documents.agent.aio import KnowledgeAgentRetrievalClient
@@ -136,6 +143,9 @@ async def create_search_index_if_not_exists(index_client: SearchIndexClient, ind
         SearchableField(name="content_text", type=SearchFieldDataType.String, searchable=True, filterable=True, hidden=False, sortable=True, facetable=True),
         SearchField(name="content_embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), vector_search_dimensions=1536, searchable=True, vector_search_profile_name="hnsw"),
         SimpleField(name="content_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
+        # New metadata fields
+        SimpleField(name="published_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
+        SearchableField(name="document_type", type=SearchFieldDataType.String, searchable=True, filterable=True, sortable=True, facetable=True),
         ComplexField(name="locationMetadata", fields=[
             SimpleField(name="pageNumber", type=SearchFieldDataType.Int32, searchable=False, filterable=True, hidden=False, sortable=True, facetable=True),
             SimpleField(name="boundingPolygons", type=SearchFieldDataType.String, searchable=False, hidden=False, filterable=False, sortable=False, facetable=False)
@@ -179,7 +189,60 @@ async def create_search_index_if_not_exists(index_client: SearchIndexClient, ind
         ]
     )
 
-    desired = SearchIndex(name=index_name, fields=fields, vector_search=vector_search, semantic_search=semantic_search)
+    # Create scoring profiles for better search relevance
+    scoring_profiles = [
+        # Profile 1: Boost recent documents (freshness only, no tag parameters)
+        ScoringProfile(
+            name="freshness_and_type_boost",
+            text_weights=TextWeights(weights={
+                "document_title": 3.0,  # Boost title matches
+                "content_text": 1.0,   # Standard content weight
+                "document_type": 2.0   # Boost document type matches
+            }),
+            functions=[
+                # Boost newer documents (documents published in last 365 days get boost)
+                FreshnessScoringFunction(
+                    field_name="published_date",
+                    boost=2.0,
+                    parameters=FreshnessScoringParameters(
+                        boosting_duration="P365D"  # ISO 8601 duration: 365 days
+                    ),
+                    interpolation="linear"
+                )
+            ],
+            function_aggregation="sum"
+        ),
+        # Profile 2: Focus on content relevance with moderate recency bias
+        ScoringProfile(
+            name="content_relevance_boost",
+            text_weights=TextWeights(weights={
+                "document_title": 4.0,  # Higher title boost for content relevance
+                "content_text": 2.0,   # Higher content weight
+                "document_type": 1.0   # Lower document type weight
+            }),
+            functions=[
+                # Moderate boost for recent documents
+                FreshnessScoringFunction(
+                    field_name="published_date",
+                    boost=1.3,
+                    parameters=FreshnessScoringParameters(
+                        boosting_duration="P180D"  # 180 days
+                    ),
+                    interpolation="linear"
+                )
+            ],
+            function_aggregation="sum"
+        )
+    ]
+
+    desired = SearchIndex(
+        name=index_name, 
+        fields=fields, 
+        vector_search=vector_search, 
+        semantic_search=semantic_search,
+        scoring_profiles=scoring_profiles,
+        default_scoring_profile="freshness_and_type_boost"  # Set default scoring profile
+    )
 
     try:
         existing = await index_client.get_index(index_name)

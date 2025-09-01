@@ -20,7 +20,11 @@ import {
     DialogTitle,
     DialogContent,
     DialogBody,
-    DialogActions
+    DialogActions,
+    Field,
+    Input,
+    Dropdown,
+    Option
 } from '@fluentui/react-components';
 import { 
     DocumentPdf24Regular,
@@ -83,6 +87,31 @@ const ProfessionalDocumentUpload: React.FC = () => {
     const [detailsOpen, setDetailsOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [deletingIndex, setDeletingIndex] = useState(false);
+
+    // Metadata state variables
+    const [publishedDate, setPublishedDate] = useState<string>('');
+    const [documentType, setDocumentType] = useState<string>('');
+    
+    // Processing options state variables
+    const [chunkSize, setChunkSize] = useState<number>(500);
+    const [chunkOverlap, setChunkOverlap] = useState<number>(50);
+    const [outputFormat, setOutputFormat] = useState<string>('markdown');
+
+    // Document type options
+    const documentTypeOptions = [
+        { key: 'quarterly_report', text: 'Quarterly Report' },
+        { key: 'newsletter', text: 'Newsletter' },
+        { key: 'articles', text: 'Articles' },
+        { key: 'annual_report', text: 'Annual Report' },
+        { key: 'financial_statement', text: 'Financial Statement' },
+        { key: 'presentation', text: 'Presentation' },
+        { key: 'whitepaper', text: 'Whitepaper' },
+        { key: 'research_report', text: 'Research Report' },
+        { key: 'policy_document', text: 'Policy Document' },
+        { key: 'manual', text: 'Manual' },
+        { key: 'guide', text: 'Guide' },
+        { key: 'other', text: 'Other' }
+    ];
 
     const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -220,6 +249,17 @@ const ProfessionalDocumentUpload: React.FC = () => {
     const handleUpload = async () => {
         if (!selectedFile) return;
 
+        // Validate required fields
+        if (!publishedDate) {
+            setMessage({ type: 'error', text: 'Please select a published date.' });
+            return;
+        }
+
+        if (!documentType) {
+            setMessage({ type: 'error', text: 'Please select a document type.' });
+            return;
+        }
+
         setUploading(true);
         setMessage(null);
         setUploadProgress(null);
@@ -246,6 +286,11 @@ const ProfessionalDocumentUpload: React.FC = () => {
                 },
                 body: JSON.stringify({
                     upload_id: uploadResult.upload_id,
+                    published_date: publishedDate,
+                    document_type: documentType,
+                    chunk_size: chunkSize,
+                    chunk_overlap: chunkOverlap,
+                    output_format: outputFormat,
                 }),
             });
 
@@ -272,6 +317,12 @@ const ProfessionalDocumentUpload: React.FC = () => {
         setUploading(false);
         setUploadProgress(null);
         setMessage(null);
+        setPublishedDate('');
+        setDocumentType('');
+        // Reset processing options to defaults
+        setChunkSize(500);
+        setChunkOverlap(50);
+        setOutputFormat('markdown');
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
@@ -288,7 +339,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
     return (
         <div className="professional-upload-container">
             {/* Header Section */}
-            <div className="upload-hero">
+            {/* <div className="upload-hero">
                 <div className="hero-content">
                     <Title1 className="hero-title">
                         <DocumentPdf24Regular className="hero-icon" />
@@ -298,7 +349,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
                         Transform your PDFs into searchable knowledge with advanced AI processing
                     </Body1>
                 </div>
-            </div>
+            </div> */}
 
             {/* Main Upload Section */}
             <div className="upload-workspace">
@@ -346,6 +397,105 @@ const ProfessionalDocumentUpload: React.FC = () => {
                             className="visually-hidden"
                             onChange={handleFileSelect}
                         />
+
+                        {/* Metadata Form Fields */}
+                        <div className="metadata-form">
+                            <div className="form-grid">
+                                <div className="form-row">
+                                    <Field label="Published Date" required>
+                                        <Input
+                                            type="date"
+                                            value={publishedDate}
+                                            onChange={(e) => setPublishedDate(e.target.value)}
+                                            placeholder="Select published date"
+                                            disabled={uploading}
+                                        />
+                                    </Field>
+                                </div>
+                                
+                                <div className="form-row">
+                                    <Field label="Document Type" required>
+                                        <Dropdown
+                                            placeholder="Select document type"
+                                            value={documentType}
+                                            selectedOptions={documentType ? [documentType] : []}
+                                            onOptionSelect={(_, data) => {
+                                                if (data.optionValue) {
+                                                    setDocumentType(data.optionValue);
+                                                }
+                                            }}
+                                            disabled={uploading}
+                                        >
+                                            {documentTypeOptions.map((option) => (
+                                                <Option key={option.key} value={option.key}>
+                                                    {option.text}
+                                                </Option>
+                                            ))}
+                                        </Dropdown>
+                                    </Field>
+                                </div>
+                            </div>
+                            
+                            {/* Processing Options */}
+                            <div className="form-section">
+                                <Title2 style={{marginTop: '20px', marginBottom: '10px'}}>Processing Options</Title2>
+                                
+                                <div className="form-grid">
+                                    <div className="form-row form-row-span-2">
+                                        <Field label="Output Format" hint="Choose how the document content is stored">
+                                            <Dropdown
+                                                placeholder="Select output format"
+                                                value={outputFormat}
+                                                selectedOptions={[outputFormat]}
+                                                onOptionSelect={(_, data) => {
+                                                    if (data.optionValue) {
+                                                        setOutputFormat(data.optionValue);
+                                                    }
+                                                }}
+                                                disabled={uploading}
+                                            >
+                                                <Option value="markdown">Markdown (Structured)</Option>
+                                                <Option value="text">Plain Text</Option>
+                                            </Dropdown>
+                                        </Field>
+                                    </div>
+                                    
+                                    <div className="form-row">
+                                        <Field label="Chunk Size" hint="Number of tokens per text chunk (100-2000)">
+                                            <Input
+                                                type="number"
+                                                value={chunkSize.toString()}
+                                                onChange={(e) => {
+                                                    const value = parseInt(e.target.value) || 500;
+                                                    setChunkSize(Math.max(100, Math.min(2000, value)));
+                                                }}
+                                                min="100"
+                                                max="2000"
+                                                step="50"
+                                                disabled={uploading}
+                                            />
+                                        </Field>
+                                    </div>
+                                    
+                                    <div className="form-row">
+                                        <Field label="Chunk Overlap" hint="Number of overlapping tokens between chunks (0-200)">
+                                            <Input
+                                                type="number"
+                                                value={chunkOverlap.toString()}
+                                                onChange={(e) => {
+                                                    const value = parseInt(e.target.value) || 50;
+                                                    setChunkOverlap(Math.max(0, Math.min(200, value)));
+                                                }}
+                                                min="0"
+                                                max="200"
+                                                step="10"
+                                                disabled={uploading}
+                                            />
+                                        </Field>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </CardPreview>
 
                     <CardFooter>
@@ -353,7 +503,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
                             <Button 
                                 appearance="primary" 
                                 size="large"
-                                disabled={!selectedFile || uploading}
+                                disabled={!selectedFile || !publishedDate || !documentType || uploading}
                                 onClick={handleUpload}
                                 icon={<ArrowUpload24Regular />}
                             >
