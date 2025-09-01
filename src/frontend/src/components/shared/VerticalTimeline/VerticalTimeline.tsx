@@ -22,10 +22,12 @@ import "./VerticalTimeline.css";
 
 interface TimelineProps {
     processingStepMsg: Record<string, ProcessingStepsMessage[]>;
+    darkMode?: boolean;
 }
 
-const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg }) => {
+const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg, darkMode = false }) => {
     const [editorJSON, setEditorJSON] = React.useState<string | undefined>();
+    
     return (
         <>
             <Dialog>
@@ -58,7 +60,7 @@ const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg }) => {
                                                     height="200px"
                                                     defaultLanguage="json"
                                                     defaultValue={JSON.stringify(msg.processingStep.content, null, 2)}
-                                                    theme="vs-dark"
+                                                    theme={darkMode ? "vs-dark" : "vs"}
                                                 />
                                                 {Array.isArray(msg.processingStep.content) && (
                                                     <div className="image-container">
@@ -99,7 +101,7 @@ const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg }) => {
                 <DialogSurface className="editor-dialog" mountNode={undefined}>
                     <DialogBody>
                         <DialogContent>
-                            <Editor height="700px" defaultLanguage="json" defaultValue={editorJSON || ""} theme="vs-dark" />
+                            <Editor height="700px" defaultLanguage="json" defaultValue={editorJSON || ""} theme={darkMode ? "vs-dark" : "vs"} />
                         </DialogContent>
                         <DialogActions>
                             <DialogTrigger disableButtonEnhancement>

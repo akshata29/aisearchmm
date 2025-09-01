@@ -96,6 +96,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
     const [chunkSize, setChunkSize] = useState<number>(500);
     const [chunkOverlap, setChunkOverlap] = useState<number>(50);
     const [outputFormat, setOutputFormat] = useState<string>('markdown');
+    const [chunkingStrategy, setChunkingStrategy] = useState<string>('document_layout');
 
     // Document type options
     const documentTypeOptions = [
@@ -291,6 +292,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
                     chunk_size: chunkSize,
                     chunk_overlap: chunkOverlap,
                     output_format: outputFormat,
+                    chunking_strategy: chunkingStrategy,
                 }),
             });
 
@@ -323,6 +325,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
         setChunkSize(500);
         setChunkOverlap(50);
         setOutputFormat('markdown');
+        setChunkingStrategy('document_layout');
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
@@ -442,6 +445,25 @@ const ProfessionalDocumentUpload: React.FC = () => {
                                 
                                 <div className="form-grid">
                                     <div className="form-row form-row-span-2">
+                                        <Field label="Chunking Strategy" hint="Document Layout uses AI to preserve document structure. Custom allows manual token-based chunking.">
+                                            <Dropdown
+                                                placeholder="Select chunking strategy"
+                                                value={chunkingStrategy}
+                                                selectedOptions={[chunkingStrategy]}
+                                                onOptionSelect={(_, data) => {
+                                                    if (data.optionValue) {
+                                                        setChunkingStrategy(data.optionValue);
+                                                    }
+                                                }}
+                                                disabled={uploading}
+                                            >
+                                                <Option value="document_layout">Document Layout (Recommended)</Option>
+                                                <Option value="custom">Custom Chunking</Option>
+                                            </Dropdown>
+                                        </Field>
+                                    </div>
+                                    
+                                    <div className="form-row form-row-span-2">
                                         <Field label="Output Format" hint="Choose how the document content is stored">
                                             <Dropdown
                                                 placeholder="Select output format"
@@ -460,39 +482,44 @@ const ProfessionalDocumentUpload: React.FC = () => {
                                         </Field>
                                     </div>
                                     
-                                    <div className="form-row">
-                                        <Field label="Chunk Size" hint="Number of tokens per text chunk (100-2000)">
-                                            <Input
-                                                type="number"
-                                                value={chunkSize.toString()}
-                                                onChange={(e) => {
-                                                    const value = parseInt(e.target.value) || 500;
-                                                    setChunkSize(Math.max(100, Math.min(2000, value)));
-                                                }}
-                                                min="100"
-                                                max="2000"
-                                                step="50"
-                                                disabled={uploading}
-                                            />
-                                        </Field>
-                                    </div>
-                                    
-                                    <div className="form-row">
-                                        <Field label="Chunk Overlap" hint="Number of overlapping tokens between chunks (0-200)">
-                                            <Input
-                                                type="number"
-                                                value={chunkOverlap.toString()}
-                                                onChange={(e) => {
-                                                    const value = parseInt(e.target.value) || 50;
-                                                    setChunkOverlap(Math.max(0, Math.min(200, value)));
-                                                }}
-                                                min="0"
-                                                max="200"
-                                                step="10"
-                                                disabled={uploading}
-                                            />
-                                        </Field>
-                                    </div>
+                                    {/* Show chunk size and overlap options only for custom chunking */}
+                                    {chunkingStrategy === 'custom' && (
+                                        <>
+                                            <div className="form-row">
+                                                <Field label="Chunk Size" hint="Number of tokens per text chunk (100-2000)">
+                                                    <Input
+                                                        type="number"
+                                                        value={chunkSize.toString()}
+                                                        onChange={(e) => {
+                                                            const value = parseInt(e.target.value) || 500;
+                                                            setChunkSize(Math.max(100, Math.min(2000, value)));
+                                                        }}
+                                                        min="100"
+                                                        max="2000"
+                                                        step="50"
+                                                        disabled={uploading}
+                                                    />
+                                                </Field>
+                                            </div>
+                                            
+                                            <div className="form-row">
+                                                <Field label="Chunk Overlap" hint="Number of overlapping tokens between chunks (0-200)">
+                                                    <Input
+                                                        type="number"
+                                                        value={chunkOverlap.toString()}
+                                                        onChange={(e) => {
+                                                            const value = parseInt(e.target.value) || 50;
+                                                            setChunkOverlap(Math.max(0, Math.min(200, value)));
+                                                        }}
+                                                        min="0"
+                                                        max="200"
+                                                        step="10"
+                                                        disabled={uploading}
+                                                    />
+                                                </Field>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>

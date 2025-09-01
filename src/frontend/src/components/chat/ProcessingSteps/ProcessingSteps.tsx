@@ -11,9 +11,10 @@ interface Props {
     showProcessingSteps: boolean;
     processingStepMsg: Record<string, ProcessingStepsMessage[]>;
     toggleEditor: () => void;
+    darkMode?: boolean;
 }
 
-const ProcessingSteps: React.FC<Props> = ({ processingStepMsg, showProcessingSteps: showProcessingSteps, toggleEditor }) => {
+const ProcessingSteps: React.FC<Props> = ({ processingStepMsg, showProcessingSteps: showProcessingSteps, toggleEditor, darkMode = false }) => {
     return (
         <Drawer size="medium" position="end" separator open={showProcessingSteps} onOpenChange={toggleEditor}>
             <DrawerHeader>
@@ -23,7 +24,7 @@ const ProcessingSteps: React.FC<Props> = ({ processingStepMsg, showProcessingSte
             </DrawerHeader>
 
             <DrawerBody>
-                <VerticalTimeline processingStepMsg={processingStepMsg} />
+                <VerticalTimeline processingStepMsg={processingStepMsg} darkMode={darkMode} />
             </DrawerBody>
         </Drawer>
     );

@@ -42,9 +42,10 @@ import ProcessingSteps from "../ProcessingSteps/ProcessingSteps";
 interface Props {
     processingStepMsg: Record<string, ProcessingStepsMessage[]>;
     thread: Thread[];
+    darkMode?: boolean;
 }
 
-const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg }) => {
+const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, darkMode = false }) => {
     const [showProcessingSteps, setShowProcessingSteps] = useState(false);
     const [processRequestId, setProcessRequestId] = useState("");
     const [highlightedCitation, setHighlightedCitation] = useState<string | undefined>();
@@ -89,15 +90,23 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
         }, {})
     );
 
-    // Enhanced citation handling with numbering
+    // Enhanced citation handling with persistent numbering across messages
     const citationRegex = /\[([^\]]+)\]/g;
+    
+    // Use useRef to maintain citation numbering across all messages without causing re-renders
+    const globalCitationMapRef = useRef<Map<string, number>>(new Map());
+    const globalCitationCounterRef = useRef<number>(1);
+
+    // Reset citation numbering when starting a new conversation
+    useEffect(() => {
+        if (thread.length === 0) {
+            globalCitationMapRef.current = new Map();
+            globalCitationCounterRef.current = 1;
+        }
+    }, [thread.length]); // Reset when thread length changes
 
     const createCitationRenderer = (textCitations: Citation[], imageCitations: Citation[]) => {
         return (children: React.ReactNode) => {
-            // Track unique citations and assign sequential numbers
-            const citationMap = new Map<string, number>();
-            let citationCounter = 1;
-            
             // Combine all citations for lookup
             const allCitations = [...textCitations, ...imageCitations];
             
@@ -119,10 +128,12 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                                 return part; // Regular text
                             } else if (index % 2 === 1) {
                                 // This is a citation ID
-                                if (!citationMap.has(part)) {
-                                    citationMap.set(part, citationCounter++);
+                                let citationNumber = globalCitationMapRef.current.get(part);
+                                if (!citationNumber) {
+                                    citationNumber = globalCitationCounterRef.current;
+                                    globalCitationMapRef.current.set(part, citationNumber);
+                                    globalCitationCounterRef.current++;
                                 }
-                                const citationNumber = citationMap.get(part)!;
                                 
                                 return (
                                     <span
@@ -603,6 +614,7 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
             <ProcessingSteps
                 showProcessingSteps={showProcessingSteps}
                 processingStepMsg={getCurProcessingStep(processRequestId)}
+                darkMode={darkMode}
                 toggleEditor={() => {
                     setShowProcessingSteps(!showProcessingSteps);
                 }}

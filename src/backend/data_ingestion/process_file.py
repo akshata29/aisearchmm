@@ -109,9 +109,9 @@ class ProcessFile:
         if document_type:
             # Normalize and validate document type
             valid_types = {
-                "quarterly report", "newsletter", "articles", "annual report", 
-                "financial statement", "presentation", "whitepaper", "research report", 
-                "policy document", "manual", "guide", "other"
+                "quarterly_report", "newsletter", "articles", "annual_report", 
+                "financial_statement", "presentation", "whitepaper", "research_report", 
+                "policy_document", "manual", "guide", "other"
             }
             normalized_type = document_type.lower().strip()
             if normalized_type in valid_types:
@@ -136,11 +136,16 @@ class ProcessFile:
         chunk_size: int = 500,
         chunk_overlap: int = 50,
         output_format: str = "markdown",  # "markdown" or "text"
+        chunking_strategy: str = "document_layout",  # "document_layout" or "custom"
     ):
         # Prepare and validate metadata
         document_metadata = self._prepare_metadata(published_date, document_type)
         print(f"Processing file '{file_name}' with metadata: {document_metadata}")
-        print(f"Chunking settings: size={chunk_size}, overlap={chunk_overlap}, format={output_format}")
+        print(f"Chunking strategy: {chunking_strategy}")
+        if chunking_strategy == "custom":
+            print(f"Custom chunking settings: size={chunk_size}, overlap={chunk_overlap}, format={output_format}")
+        else:
+            print(f"Document layout chunking: using semantic structure, format={output_format}")
         
         try:
             await self.sample_container_client.create_container()
@@ -170,12 +175,24 @@ class ProcessFile:
                 ])
             ]
 
+
             vector_search = VectorSearch(
                 algorithms=[
                     HnswAlgorithmConfiguration(
                         name="hnsw-config",
                         kind="hnsw",
                         parameters={"m": 4, "efConstruction": 400, "metric": "cosine"},
+                    )
+                ],
+                vectorizers=[
+                    AzureOpenAIVectorizer(
+                        vectorizer_name="openai-vectorizer",
+                        parameters=AzureOpenAIVectorizerParameters(
+                            resource_url=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+                            deployment_name=os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
+                            model_name=os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL_NAME", "text-embedding-ada-002"),
+                            api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+                        )
                     )
                 ],
                 profiles=[
@@ -262,11 +279,11 @@ class ProcessFile:
             print(f"Error creating index: {e}")
         ext = file_name.split(".")[-1].lower()
         if ext == "pdf":
-            await self._process_pdf(file_bytes, file_name, index_name, published_date, document_type, chunk_size, chunk_overlap, output_format)
+            await self._process_pdf(file_bytes, file_name, index_name, published_date, document_type, chunk_size, chunk_overlap, output_format, chunking_strategy)
         else:
             print(f"Unsupported file type: {file_name}")
 
-    async def _process_pdf(self, file_bytes: bytes, file_name: str, index_name: str, published_date: str = None, document_type: str = None, chunk_size: int = 500, chunk_overlap: int = 50, output_format: str = "markdown"):
+    async def _process_pdf(self, file_bytes: bytes, file_name: str, index_name: str, published_date: str = None, document_type: str = None, chunk_size: int = 500, chunk_overlap: int = 50, output_format: str = "markdown", chunking_strategy: str = "document_layout"):
         """Processes PDF documents for text, layout, and image embeddings."""
         
         # Prepare and validate metadata for this document
@@ -297,100 +314,34 @@ class ProcessFile:
             except Exception:
                 pass
 
-        # Process formatted content once for entire document or fall back to page-by-page processing
-        if formatted_content:
-            print(f"Processing entire document with native Document Intelligence formatting.")
-            # Process the entire formatted content at once with document-level chunking
-            all_text_chunks, all_text_metadata = self._chunk_document_formatted_content(
-                formatted_content, paragraphs, chunk_size, chunk_overlap, output_format
-            )
-            
-            if all_text_chunks:
-                print(f"Extracted {len(all_text_chunks)} text chunks from formatted content.")
-                text_embeddings_response = await self.text_model.embed(input=all_text_chunks)
-                text_embeddings = text_embeddings_response.data
-
-                for idx, chunk in enumerate(all_text_chunks):
-                    document_id = str(uuid.uuid4())
-                    chunk_metadata = all_text_metadata[idx] if idx < len(all_text_metadata) else {}
-                    
-                    documents.append({
-                        "content_id": document_id,
-                        "text_document_id": str(uuid.uuid4()),
-                        "content_text": chunk,
-                        "text_vector": text_embeddings[idx].embedding,
-                        "document_title": file_name,
-                        "content_path": f"{file_name}#page{chunk_metadata.get('pageNumber', 1)}",
-                        "published_date": document_metadata.get("published_date"),
-                        "document_type": document_metadata.get("document_type"),
-                        "locationMetadata": chunk_metadata
-                    })
-
-                # Count unique pages for statistics reporting
-                unique_pages = set()
-                for metadata in all_text_metadata:
-                    if metadata and "pageNumber" in metadata:
-                        unique_pages.add(metadata["pageNumber"])
-
-                # Report statistics for unified processing
-                if self.progress_cb:
-                    try:
-                        self.progress_cb(
-                            step="content_extraction",
-                            message=f"Processed {len(all_text_chunks)} text chunks across {len(unique_pages)} pages.",
-                            progress=None,
-                            increments={"pages_processed": len(unique_pages), "chunks_created": len(all_text_chunks)},
-                        )
-                    except Exception:
-                        pass
+        # Choose processing approach based on chunking strategy
+        if chunking_strategy == "document_layout":
+            # Document Layout approach: Use Document Intelligence's semantic structure
+            print(f"Using Document Layout approach for semantic chunking.")
+            await self._process_with_document_layout(paragraphs, documents, file_name, document_metadata, page_dict, index_name)
         else:
-            # Fallback to page-by-page processing using paragraphs
-            print(f"Using fallback page-by-page processing.")
-            for page_number, paras in list(page_dict.items()):
-                print(f"Processing page {page_number} of {file_name}.")
-                
-                text_chunks, text_metadata = self._chunk_text_with_metadata(
-                    page_number, paras, chunk_size, chunk_overlap, output_format
-                )
-
-                print(f"Extracted {len(text_chunks)} text chunks from page {page_number}.")
-                if text_chunks:
-                    text_embeddings_response = await self.text_model.embed(input=text_chunks)
-                    text_embeddings = text_embeddings_response.data
-
-                    for idx, chunk in enumerate(text_chunks):
-                        document_id = str(uuid.uuid4())
-                        chunk_metadata = text_metadata[idx] if idx < len(text_metadata) else {}
-                        
-                        documents.append({
-                            "content_id": str(uuid.uuid4()),
-                            "text_document_id": document_id,
-                            "image_document_id": None,
-                            "document_title": file_name,
-                            "content_text": chunk,
-                            "text_vector": text_embeddings[idx].embedding,
-                            "content_path": f"{file_name}#page{page_number}",
-                            "published_date": document_metadata["published_date"],
-                            "document_type": document_metadata["document_type"],
-                            "locationMetadata": chunk_metadata
-                        })
-
-                # Progress tick
-                if self.progress_cb:
-                    try:
-                        self.progress_cb(
-                            step="content_extraction",
-                            message=f"Processed {len(text_chunks) if text_chunks else 0} text chunks on page {page_number}.",
-                            progress=None,
-                            increments={"pages_processed": 1, "chunks_created": len(text_chunks) if text_chunks else 0},
-                        )
-                    except Exception:
-                        pass
+            # Custom approach: Traditional token-based chunking (existing logic)
+            print(f"Using Custom chunking approach.")
+            await self._process_with_custom_chunking(paragraphs, formatted_content, documents, file_name, document_metadata, page_dict, chunk_size, chunk_overlap, output_format)
 
         # Process images for all pages (works for both formatted and paragraph-based processing)
         for page_number, paras in list(page_dict.items()):
 
             associated_images = [img for img in images if img.get("page_number") == page_number]
+
+            # Create context from page content for better image descriptions
+            page_context = ""
+            if paras:
+                # Get text content from this page to provide context for image verbalization
+                page_texts = []
+                for para in paras[:5]:  # Limit to first 5 paragraphs for context
+                    if para.content and para.content.strip():
+                        # Skip page numbers and headers/footers
+                        role = getattr(para, 'role', None)
+                        if role not in ["pageNumber", "pageHeader", "pageFooter"]:
+                            page_texts.append(para.content.strip())
+                
+                page_context = " ".join(page_texts)[:1000]  # Limit context length
 
             for img in associated_images:
                 print(f"Processing image {img['blob_name']} on page {page_number}.")
@@ -399,8 +350,26 @@ class ProcessFile:
                 blob_client = self.container_client.get_blob_client(blob_name)
                 image_base64 = await get_blob_as_base64(blob_client)
                 
-                # Generate content embedding for the image description
-                image_description = f"Image from page {img['page_number']} of {file_name}"
+                # Generate detailed image description using chat completion model
+                try:
+                    if self.progress_cb:
+                        try:
+                            self.progress_cb(
+                                step="image_verbalization",
+                                message=f"Generating description for image on page {page_number}...",
+                                progress=None,
+                                increments={},
+                            )
+                        except Exception:
+                            pass
+                    
+                    image_description = await self._verbalize_image(image_base64, page_context)
+                    print(f"Generated image description: {image_description[:100]}...")
+                except Exception as e:
+                    print(f"Failed to generate image description: {e}")
+                    image_description = f"Image from page {img['page_number']} of {file_name}"
+                
+                # Generate embedding for the verbalized description
                 try:
                     img_text_embedding_response = await self.text_model.embed(input=[image_description])
                     image_content_embedding = img_text_embedding_response.data[0].embedding
@@ -408,14 +377,14 @@ class ProcessFile:
                     print(f"Failed to generate embedding for image description: {e}")
                     continue
                 
-                # Omit image_vector to avoid dimension mismatch unless configured properly
+                # Store both text and image content in the same content_embedding field
                 documents.append({
                     "content_id": str(uuid.uuid4()),
                     "text_document_id": None,
-                    "image_document_id": document_id,
+                    "image_document_id": str(uuid.uuid4()),  # Fixed: use new UUID for image
                     "document_title": file_name,
-                    "content_text": image_description,
-                    "text_vector": image_content_embedding,
+                    "content_text": image_description,  # Now contains rich, verbalized description
+                    "content_embedding": image_content_embedding,  # Embedding of the detailed description
                     "content_path": blob_name,
                     "published_date": document_metadata["published_date"],
                     "document_type": document_metadata["document_type"],
@@ -537,6 +506,313 @@ class ProcessFile:
                 print(f"Figure {figure.id} not found: {e}")
                 continue
         return images_info
+
+    async def _process_with_document_layout(self, paragraphs, documents, file_name, document_metadata, page_dict, index_name):
+        """
+        Process documents using Document Intelligence's semantic structure.
+        Each paragraph/section becomes its own searchable unit with precise location data.
+        """
+        total_paragraphs = len(paragraphs)
+        processed_count = 0
+        
+        # Group paragraphs by semantic meaning and process each as a unit
+        semantic_chunks = self._create_semantic_chunks(paragraphs)
+        
+        print(f"Created {len(semantic_chunks)} semantic chunks from {total_paragraphs} paragraphs.")
+        
+        if semantic_chunks:
+            # Extract text content for embedding
+            chunk_texts = [chunk["content"] for chunk in semantic_chunks]
+            
+            # Generate embeddings for all chunks at once
+            text_embeddings_response = await self.text_model.embed(input=chunk_texts)
+            text_embeddings = text_embeddings_response.data
+            
+            # Create documents for each semantic chunk
+            for idx, chunk in enumerate(semantic_chunks):
+                document_id = str(uuid.uuid4())
+                
+                documents.append({
+                    "content_id": document_id,
+                    "text_document_id": str(uuid.uuid4()),
+                    "image_document_id": None,
+                    "document_title": file_name,
+                    "content_text": chunk["content"],
+                    "content_embedding": text_embeddings[idx].embedding,
+                    "content_path": f"{file_name}#page{chunk['page_number']}#{chunk.get('element_type', 'content')}",
+                    "published_date": document_metadata["published_date"],
+                    "document_type": document_metadata["document_type"],
+                    "locationMetadata": {
+                        "pageNumber": chunk["page_number"],
+                        "boundingPolygons": json.dumps(chunk["bounding_polygons"])
+                    }
+                })
+                
+                processed_count += 1
+                
+                # Batch index documents
+                if len(documents) >= 10:
+                    await self._index_documents(index_name, documents)
+                    documents.clear()
+        
+        # Report progress with correct keys for statistics
+        if self.progress_cb:
+            try:
+                # Count unique pages represented in semantic chunks
+                unique_pages = set()
+                for chunk in semantic_chunks:
+                    unique_pages.add(chunk["page_number"])
+                
+                self.progress_cb(
+                    step="content_extraction",
+                    message=f"Processed {processed_count} semantic chunks across {len(unique_pages)} pages using document layout structure.",
+                    progress=None,
+                    increments={"pages_processed": len(unique_pages), "chunks_created": processed_count},
+                )
+            except Exception:
+                pass
+
+    async def _process_with_custom_chunking(self, paragraphs, formatted_content, documents, file_name, document_metadata, page_dict, chunk_size, chunk_overlap, output_format):
+        """
+        Process documents using traditional token-based chunking (existing approach).
+        """
+        # Process formatted content once for entire document or fall back to page-by-page processing
+        if formatted_content:
+            print(f"Processing entire document with native Document Intelligence formatting.")
+            # Process the entire formatted content at once with document-level chunking
+            all_text_chunks, all_text_metadata = self._chunk_document_formatted_content(
+                formatted_content, paragraphs, chunk_size, chunk_overlap, output_format
+            )
+            
+            if all_text_chunks:
+                print(f"Extracted {len(all_text_chunks)} text chunks from formatted content.")
+                text_embeddings_response = await self.text_model.embed(input=all_text_chunks)
+                text_embeddings = text_embeddings_response.data
+
+                for idx, chunk in enumerate(all_text_chunks):
+                    document_id = str(uuid.uuid4())
+                    chunk_metadata = all_text_metadata[idx] if idx < len(all_text_metadata) else {}
+                    
+                    documents.append({
+                        "content_id": document_id,
+                        "text_document_id": str(uuid.uuid4()),
+                        "content_text": chunk,
+                        "content_embedding": text_embeddings[idx].embedding,
+                        "document_title": file_name,
+                        "content_path": f"{file_name}#page{chunk_metadata.get('pageNumber', 1)}",
+                        "published_date": document_metadata.get("published_date"),
+                        "document_type": document_metadata.get("document_type"),
+                        "locationMetadata": chunk_metadata
+                    })
+
+                # Count unique pages for statistics reporting
+                unique_pages = set()
+                for metadata in all_text_metadata:
+                    if metadata and "pageNumber" in metadata:
+                        unique_pages.add(metadata["pageNumber"])
+
+                # Report statistics for unified processing
+                if self.progress_cb:
+                    try:
+                        self.progress_cb(
+                            step="content_extraction",
+                            message=f"Processed {len(all_text_chunks)} text chunks across {len(unique_pages)} pages.",
+                            progress=None,
+                            increments={"pages_processed": len(unique_pages), "chunks_created": len(all_text_chunks)},
+                        )
+                    except Exception:
+                        pass
+        else:
+            # Fallback to page-by-page processing using paragraphs
+            print(f"Using fallback page-by-page processing.")
+            for page_number, paras in list(page_dict.items()):
+                print(f"Processing page {page_number} of {file_name}.")
+                
+                text_chunks, text_metadata = self._chunk_text_with_metadata(
+                    page_number, paras, chunk_size, chunk_overlap, output_format
+                )
+
+                print(f"Extracted {len(text_chunks)} text chunks from page {page_number}.")
+                if text_chunks:
+                    text_embeddings_response = await self.text_model.embed(input=text_chunks)
+                    text_embeddings = text_embeddings_response.data
+
+                    for idx, chunk in enumerate(text_chunks):
+                        document_id = str(uuid.uuid4())
+                        chunk_metadata = text_metadata[idx] if idx < len(text_metadata) else {}
+                        
+                        documents.append({
+                            "content_id": str(uuid.uuid4()),
+                            "text_document_id": document_id,
+                            "image_document_id": None,
+                            "document_title": file_name,
+                            "content_text": chunk,
+                            "content_embedding": text_embeddings[idx].embedding,
+                            "content_path": f"{file_name}#page{page_number}",
+                            "published_date": document_metadata["published_date"],
+                            "document_type": document_metadata["document_type"],
+                            "locationMetadata": chunk_metadata
+                        })
+
+                # Progress tick
+                if self.progress_cb:
+                    try:
+                        self.progress_cb(
+                            step="content_extraction",
+                            message=f"Processed {len(text_chunks) if text_chunks else 0} text chunks on page {page_number}.",
+                            progress=None,
+                            increments={"pages_processed": 1, "chunks_created": len(text_chunks) if text_chunks else 0},
+                        )
+                    except Exception:
+                        pass
+
+    def _create_semantic_chunks(self, paragraphs):
+        """
+        Create semantic chunks based on Document Intelligence's structure detection.
+        Groups related paragraphs and preserves document hierarchy.
+        """
+        semantic_chunks = []
+        current_section = None
+        
+        for paragraph in paragraphs:
+            if not paragraph.content or not paragraph.content.strip():
+                continue
+                
+            role = getattr(paragraph, 'role', None)
+            content = paragraph.content.strip()
+            
+            # Extract bounding regions
+            bounding_polygons = []
+            page_number = 1
+            
+            if paragraph.bounding_regions:
+                for region in paragraph.bounding_regions:
+                    page_number = region.get("pageNumber", page_number)
+                    if hasattr(region, 'polygon'):
+                        bounding_polygons.append(self._format_polygon(region.polygon))
+            
+            # Skip page numbers, headers, and footers as standalone chunks
+            if role in ["pageNumber", "pageHeader", "pageFooter"]:
+                continue
+            
+            # Handle different document element types
+            if role == "title":
+                # Main title - standalone chunk
+                semantic_chunks.append({
+                    "content": content,
+                    "element_type": "title",
+                    "page_number": page_number,
+                    "bounding_polygons": bounding_polygons,
+                    "role": role
+                })
+                current_section = None
+                
+            elif role == "sectionHeading":
+                # Section heading - start new section or standalone
+                if current_section and current_section["content"]:
+                    # Finish previous section
+                    semantic_chunks.append(current_section)
+                
+                # Create new section or standalone heading
+                semantic_chunks.append({
+                    "content": content,
+                    "element_type": "section_heading",
+                    "page_number": page_number,
+                    "bounding_polygons": bounding_polygons,
+                    "role": role
+                })
+                current_section = None
+                
+            elif role in ["footnote", "formula"]:
+                # Special elements - standalone chunks
+                semantic_chunks.append({
+                    "content": content,
+                    "element_type": role,
+                    "page_number": page_number,
+                    "bounding_polygons": bounding_polygons,
+                    "role": role
+                })
+                
+            else:
+                # Regular paragraph - group with similar content
+                if not current_section:
+                    current_section = {
+                        "content": content,
+                        "element_type": "paragraph_group",
+                        "page_number": page_number,
+                        "bounding_polygons": bounding_polygons.copy(),
+                        "role": "paragraph"
+                    }
+                else:
+                    # Add to current section if on same page and content is related
+                    if (page_number == current_section["page_number"] and 
+                        len(current_section["content"]) < 1500):  # Keep sections reasonable size
+                        current_section["content"] += f"\n\n{content}"
+                        current_section["bounding_polygons"].extend(bounding_polygons)
+                    else:
+                        # Finish current section and start new one
+                        semantic_chunks.append(current_section)
+                        current_section = {
+                            "content": content,
+                            "element_type": "paragraph_group",
+                            "page_number": page_number,
+                            "bounding_polygons": bounding_polygons.copy(),
+                            "role": "paragraph"
+                        }
+        
+        # Don't forget the last section
+        if current_section and current_section["content"]:
+            semantic_chunks.append(current_section)
+        
+        return semantic_chunks
+
+    async def _verbalize_image(self, image_base64: str, page_context: str = "") -> str:
+        """
+        Generate a detailed description of an image using a chat completion model.
+        This follows the Microsoft documentation approach for image verbalization.
+        """
+        try:
+            # Create a prompt for image verbalization with optional page context
+            context_prompt = f"\n\nContext from the document page: {page_context}" if page_context.strip() else ""
+            
+            prompt = f"""You are an AI assistant that analyzes images from documents to create detailed, searchable descriptions.
+
+Please provide a comprehensive description of this image that includes:
+1. What type of visual element this is (chart, diagram, photo, table, etc.)
+2. Key visual elements, text, or data visible in the image
+3. The purpose or function this image serves in the document
+4. Any relationships between elements shown
+5. Important details that would help someone search for this content
+
+Make your description detailed but concise, focusing on information that would be useful for document search and retrieval.{context_prompt}
+
+Provide only the description without any preamble or explanation."""
+
+            # Use the instructor client to get image description
+            response = await self.instructor_openai_client.chat.completions.create(
+                model=self.chatcompletions_model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{image_base64}"}
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=500,
+                temperature=0.1
+            )
+            
+            description = response.choices[0].message.content.strip()
+            return description if description else "Image from document (description unavailable)"
+            
+        except Exception as e:
+            print(f"Failed to verbalize image: {e}")
+            return "Image from document (description unavailable)"
 
     async def _get_image_embedding(self, image_base64: str):
         """Generates image embeddings."""
@@ -938,6 +1214,17 @@ class ProcessFile:
                     name="hnsw-config",
                     kind=VectorSearchAlgorithmKind.HNSW,
                     parameters={"m": 4, "efConstruction": 400, "efSearch": 500, "metric": "cosine"}
+                )
+            ],
+            vectorizers=[
+                AzureOpenAIVectorizer(
+                    vectorizer_name="openai-vectorizer",
+                    parameters=AzureOpenAIVectorizerParameters(
+                        resource_url=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+                        deployment_name=os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
+                        model_name=os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL_NAME", "text-embedding-ada-002"),
+                        api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+                    )
                 )
             ]
         )

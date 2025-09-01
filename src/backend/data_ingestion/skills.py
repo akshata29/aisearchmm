@@ -43,7 +43,7 @@ def getAzureOpenAIEmbeddingSkill(deploymentId, resourceUri, modelName):
                 name="text", source="/document/text_sections/*/content"
             )
         ],
-        outputs=[OutputFieldMappingEntry(name="embedding", target_name="text_vector")],
+        outputs=[OutputFieldMappingEntry(name="embedding", target_name="content_embedding")],
         resource_url=resourceUri,
         deployment_name=deploymentId,
         dimensions=1536,

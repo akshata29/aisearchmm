@@ -2,7 +2,6 @@
     padding: 24px;
     max-width: 1200px;
     margin: 0 auto;
-    /* Remove fixed height constraints and let content flow naturally */
 }
 
 .admin-header {
@@ -62,8 +61,61 @@
     background: var(--colorNeutralBackground1);
     border-radius: 8px;
     border: 1px solid var(--colorNeutralStroke2);
-    overflow: hidden;
-    margin-bottom: 24px; /* Add margin to prevent cut-off */
+    margin-bottom: 24px;
+    /* Force the height and make it scrollable */
+    height: 400px; /* Fixed height to force overflow */
+    overflow-y: scroll; /* Always show scrollbar */
+    overflow-x: hidden;
+}
+
+/* Ensure the table takes full width */
+.admin-table-container table {
+    width: 100%;
+    min-height: 100%;
+}
+
+/* Modern scrollbar for the main table - more prominent */
+.admin-table-container::-webkit-scrollbar {
+    width: 12px; /* Make wider for better visibility */
+}
+
+.admin-table-container::-webkit-scrollbar-track {
+    background: var(--colorNeutralBackground3);
+    border-radius: 6px;
+    margin: 4px; /* Add margin to track */
+}
+
+.admin-table-container::-webkit-scrollbar-thumb {
+    background: var(--colorBrandBackground2); /* More prominent color */
+    border-radius: 6px;
+    border: 2px solid var(--colorNeutralBackground1);
+    transition: background 0.2s ease;
+    /* Make thumb more visible */
+    min-height: 40px;
+}
+
+.admin-table-container::-webkit-scrollbar-thumb:hover {
+    background: var(--colorBrandBackground);
+}
+
+/* Firefox scrollbar styling - more prominent */
+.admin-table-container {
+    scrollbar-width: auto; /* Changed from thin to auto for better visibility */
+    scrollbar-color: var(--colorBrandBackground2) var(--colorNeutralBackground3);
+}
+
+/* Ensure table header stays fixed when scrolling */
+.admin-table-container table {
+    width: 100%;
+    position: relative;
+}
+
+.admin-table-container thead {
+    position: sticky;
+    top: 0;
+    background: var(--colorNeutralBackground1);
+    z-index: 10;
+    box-shadow: 0 1px 0 var(--colorNeutralStroke2);
 }
 
 .chunk-count {
@@ -107,25 +159,31 @@
     background: var(--colorNeutralBackground2);
     border-radius: 8px;
     margin: 8px 0 32px 0;
-    max-height: 600px;
+    max-height: 60vh; /* Increase height and make responsive */
     overflow-y: auto;
     border: 1px solid var(--colorNeutralStroke2);
+    /* Ensure it doesn't get cut off */
+    position: relative;
+    z-index: 1;
 }
 
-/* Custom scrollbar for document chunks container */
+/* Custom scrollbar for document chunks container - more prominent */
 .document-chunks-container::-webkit-scrollbar {
-    width: 8px;
+    width: 12px; /* Match main table scrollbar width */
 }
 
 .document-chunks-container::-webkit-scrollbar-track {
     background: var(--colorNeutralBackground3);
-    border-radius: 4px;
+    border-radius: 6px;
+    margin: 4px;
 }
 
 .document-chunks-container::-webkit-scrollbar-thumb {
-    background: var(--colorNeutralStroke1);
-    border-radius: 4px;
+    background: var(--colorBrandBackground2); /* More visible color */
+    border-radius: 6px;
     border: 2px solid var(--colorNeutralBackground2);
+    min-height: 40px;
+    transition: background 0.2s ease;
 }
 
 .document-chunks-container::-webkit-scrollbar-thumb:hover {
@@ -260,6 +318,38 @@
     
     .admin-table-container {
         overflow-x: auto;
+        max-height: 60vh; /* Reduce height on mobile */
+        /* Show scrollbars on mobile */
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* More prominent scrollbars on mobile */
+    .admin-table-container::-webkit-scrollbar {
+        width: 14px;
+        height: 14px;
+    }
+    
+    .admin-table-container::-webkit-scrollbar-thumb {
+        background: var(--colorBrandBackground);
+        border-radius: 7px;
+        border: 1px solid var(--colorNeutralBackground1);
+    }
+    
+    /* Show horizontal scrollbar on mobile for wide tables */
+    .admin-table-container::-webkit-scrollbar:horizontal {
+        height: 14px;
+    }
+    
+    .admin-table-container::-webkit-scrollbar-track:horizontal {
+        background: var(--colorNeutralBackground3);
+        border-radius: 7px;
+        margin: 4px;
+    }
+    
+    .admin-table-container::-webkit-scrollbar-thumb:horizontal {
+        background: var(--colorBrandBackground);
+        border-radius: 7px;
+        border: 1px solid var(--colorNeutralBackground1);
     }
     
     /* Make chunks display in single column on mobile */
@@ -272,6 +362,16 @@
     .document-chunks-container {
         padding: 12px;
         margin: 8px 0 16px 0;
+        max-height: 50vh; /* Reduce height on mobile */
+    }
+    
+    .document-chunks-container::-webkit-scrollbar {
+        width: 14px; /* More prominent on mobile */
+    }
+    
+    .document-chunks-container::-webkit-scrollbar-thumb {
+        background: var(--colorBrandBackground);
+        border-radius: 7px;
     }
     
     .chunk-content-preview {

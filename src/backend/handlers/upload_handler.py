@@ -238,6 +238,7 @@ class SimpleDocumentUploadHandler:
             chunk_size = data.get('chunk_size', 500)
             chunk_overlap = data.get('chunk_overlap', 50)
             output_format = data.get('output_format', 'markdown')  # 'markdown' or 'text'
+            chunking_strategy = data.get('chunking_strategy', 'document_layout')  # 'document_layout' or 'custom'
             
             if not upload_id or upload_id not in self.processing_status:
                 return web.json_response(
@@ -268,7 +269,8 @@ class SimpleDocumentUploadHandler:
             self.processing_status[upload_id]["processing_options"] = {
                 "chunk_size": chunk_size,
                 "chunk_overlap": chunk_overlap,
-                "output_format": output_format
+                "output_format": output_format,
+                "chunking_strategy": chunking_strategy
             }
 
             # Update status
@@ -384,6 +386,7 @@ class SimpleDocumentUploadHandler:
             chunk_size = processing_options.get("chunk_size", 500)
             chunk_overlap = processing_options.get("chunk_overlap", 50)
             output_format = processing_options.get("output_format", "markdown")
+            chunking_strategy = processing_options.get("chunking_strategy", "document_layout")
 
             # Process the file with metadata and processing options
             await processor.process_file(
@@ -394,7 +397,8 @@ class SimpleDocumentUploadHandler:
                 document_type=document_type,
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap,
-                output_format=output_format
+                output_format=output_format,
+                chunking_strategy=chunking_strategy
             )
 
             # Update final status

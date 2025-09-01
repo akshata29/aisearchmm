@@ -194,6 +194,7 @@ async def process_files(
                 file_bytes,
                 os.path.basename(doc_path),
                 os.environ["SEARCH_INDEX_NAME"],
+                chunking_strategy="document_layout"  # Use default document layout strategy
             )
 
             # Copy the document to documents_output_folder
@@ -232,6 +233,7 @@ async def process_blobs(
             data,
             blob.name,
             os.environ["SEARCH_INDEX_NAME"],
+            chunking_strategy="document_layout"  # Use default document layout strategy
         )
 
 

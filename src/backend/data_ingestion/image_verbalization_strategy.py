@@ -86,7 +86,7 @@ class IndexerImgVerbalizationStrategy(Strategy):
                         mappings=[
                             InputFieldMappingEntry(
                                 name="content_embedding",
-                                source="/document/text_sections/*/text_vector",
+                                source="/document/text_sections/*/content_embedding",
                             ),
                             InputFieldMappingEntry(
                                 name="content_text",

@@ -45,7 +45,7 @@ function App() {
                             <div className="content">
                                 {thread.length || newQ ? (
                                     <>
-                                        {thread.length ? <ProfessionalChatContent thread={thread} processingStepMsg={processingStepsMessage} /> : <></>}
+                                        {thread.length ? <ProfessionalChatContent thread={thread} processingStepMsg={processingStepsMessage} darkMode={darkMode} /> : <></>}
                                     </>
                                 ) : (
                                     <>
