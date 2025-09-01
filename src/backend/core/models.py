@@ -10,6 +10,13 @@ class SearchConfig(TypedDict):
     use_semantic_ranker: bool = False
     use_streaming: bool = False
     use_knowledge_agent: bool = False
+    
+    # Enhanced Knowledge Agent options
+    recency_preference_days: Optional[int] = 365  # Boost documents within this many days
+    query_complexity: Optional[Literal["low", "medium", "high"]] = "medium"
+    preferred_document_types: Optional[List[str]] = None  # e.g., ["research_paper", "technical_document"]
+    enable_post_processing_boost: Optional[bool] = True
+    additional_filters: Optional[List[str]] = None  # Additional OData filters
 
 
 class SearchRequestParameters(TypedDict):

@@ -58,8 +58,15 @@ class DocumentPerChunkDataModel(DataModel):
         return payload
 
     def extract_citation(self, document):
+        # Ensure locationMetadata has the expected structure
+        location_metadata = document.get("locationMetadata")
+        if not location_metadata or not isinstance(location_metadata, dict):
+            location_metadata = {"pageNumber": 1}  # Default fallback
+        elif "pageNumber" not in location_metadata:
+            location_metadata["pageNumber"] = 1  # Ensure pageNumber exists
+            
         return {
-            "locationMetadata": document["locationMetadata"],
+            "locationMetadata": location_metadata,
             "text": document["content_text"],
             "title": document["document_title"],
             "content_id": document.get("content_id") or document.get("id"),

@@ -15,10 +15,44 @@ const PdfHighlighter = ({ pdfPath, pageNumber, boundingPolygons }: PdfHighlighte
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const [pageSize, setPageSize] = useState<{ width: number; height: number } | null>(null);
 
-    // Memoize parsed bounding polygons to avoid repeated JSON parsing
+    // Memoize parsed bounding polygons and filter for more precise highlighting
     const parsedPolygons = useMemo(() => {
         try {
-            return JSON.parse(boundingPolygons) as BoundingPolygon[];
+            const polygons = JSON.parse(boundingPolygons) as BoundingPolygon[];
+            
+            // Filter out polygons that are too large (likely covering entire page/sections)
+            const filteredPolygons = polygons.filter(polygon => {
+                if (polygon.length < 3) return false; // Invalid polygon
+                
+                // Calculate bounding box area
+                const xs = polygon.map(coord => coord.x);
+                const ys = polygon.map(coord => coord.y);
+                const width = Math.max(...xs) - Math.min(...xs);
+                const height = Math.max(...ys) - Math.min(...ys);
+                const area = width * height;
+                
+                // Filter out polygons that are too large (likely covering most of the page)
+                // These thresholds may need adjustment based on your document format
+                return area < 0.4; // Less than 40% of page area (adjust as needed)
+            });
+            
+            // If we filtered out too many, take the smallest ones
+            if (filteredPolygons.length === 0 && polygons.length > 0) {
+                // Sort by area and take the smallest polygons
+                const polygonsWithArea = polygons.map(polygon => {
+                    const xs = polygon.map(coord => coord.x);
+                    const ys = polygon.map(coord => coord.y);
+                    const width = Math.max(...xs) - Math.min(...xs);
+                    const height = Math.max(...ys) - Math.min(...ys);
+                    const area = width * height;
+                    return { polygon, area };
+                }).sort((a, b) => a.area - b.area);
+                
+                // Take the 3 smallest polygons
+                return polygonsWithArea.slice(0, 3).map(item => item.polygon);
+            }
+            
+            return filteredPolygons.slice(0, 5); // Limit to 5 polygons max
         } catch (error) {
             console.error("Failed to parse boundingPolygons:", error);
             return [];
@@ -30,31 +64,37 @@ const PdfHighlighter = ({ pdfPath, pageNumber, boundingPolygons }: PdfHighlighte
     };
 
     const drawOverlay = useCallback(
-        (coords: Coordinates[]) => {
+        (coords: Coordinates[], index: number = 0) => {
             if (pageSize && canvasRef.current) {
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext("2d");
 
                 if (ctx) {
-                    ctx.strokeStyle = "blue";
+                    // Use different colors/opacity for multiple highlights to distinguish them
+                    const alpha = Math.max(0.2, 0.8 - (index * 0.15)); // Decrease opacity for subsequent highlights
+                    ctx.fillStyle = `rgba(0, 123, 255, ${alpha})`; // Semi-transparent blue
+                    ctx.strokeStyle = "rgba(0, 123, 255, 0.8)";
                     ctx.lineWidth = 2;
+                    
                     ctx.beginPath();
 
                     // Adjust scaling based on page size and zoom level
                     const scaleX = canvas.width / pageSize.width;
                     const scaleY = canvas.height / pageSize.height;
 
-                    coords.forEach((coord, index) => {
+                    coords.forEach((coord, coordIndex) => {
                         const x = coord.x * scaleX * 74;
                         const y = coord.y * scaleY * 72;
-                        if (index === 0) {
+                        if (coordIndex === 0) {
                             ctx.moveTo(x, y);
                         } else {
                             ctx.lineTo(x, y);
                         }
                     });
+                    
                     ctx.closePath();
-                    ctx.stroke();
+                    ctx.fill(); // Fill the polygon with semi-transparent color
+                    ctx.stroke(); // Draw the border
                 }
             }
         },
@@ -73,8 +113,8 @@ const PdfHighlighter = ({ pdfPath, pageNumber, boundingPolygons }: PdfHighlighte
 
             // Use requestAnimationFrame for smoother rendering
             requestAnimationFrame(() => {
-                parsedPolygons.forEach(bound => {
-                    drawOverlay(bound);
+                parsedPolygons.forEach((bound, index) => {
+                    drawOverlay(bound, index);
                 });
             });
         }

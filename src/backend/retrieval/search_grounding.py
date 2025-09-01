@@ -31,7 +31,9 @@ class SearchGroundingRetriever(GroundingRetriever):
         options: SearchConfig,
     ) -> GroundingResults:
 
+        logger.info("Generating search query")
         query = await self._generate_search_query(user_message, chat_thread)
+        logger.info(f"Generated search query: {query}")
 
         try:
             payload = self.data_model.create_search_payload(query, options)

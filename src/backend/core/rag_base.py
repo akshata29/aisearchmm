@@ -51,6 +51,12 @@ class RagBase(ABC):
             use_semantic_ranker=config_dict.get("use_semantic_ranker", False),
             use_streaming=config_dict.get("use_streaming", False),
             use_knowledge_agent=config_dict.get("use_knowledge_agent", False),
+            # Enhanced Knowledge Agent configurations
+            recency_preference_days=config_dict.get("recency_preference_days", 365),
+            query_complexity=config_dict.get("query_complexity", "medium"),
+            preferred_document_types=config_dict.get("preferred_document_types", []),
+            enable_post_processing_boost=config_dict.get("enable_post_processing_boost", True),
+            additional_filters=config_dict.get("additional_filters", []),
         )
         request_id = request_params.get("request_id", str(int(time.time())))
         response = await self._create_stream_response(request)

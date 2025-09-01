@@ -325,6 +325,24 @@ class ProcessFile:
                         "document_type": document_metadata.get("document_type"),
                         "locationMetadata": chunk_metadata
                     })
+
+                # Count unique pages for statistics reporting
+                unique_pages = set()
+                for metadata in all_text_metadata:
+                    if metadata and "pageNumber" in metadata:
+                        unique_pages.add(metadata["pageNumber"])
+
+                # Report statistics for unified processing
+                if self.progress_cb:
+                    try:
+                        self.progress_cb(
+                            step="content_extraction",
+                            message=f"Processed {len(all_text_chunks)} text chunks across {len(unique_pages)} pages.",
+                            progress=None,
+                            increments={"pages_processed": len(unique_pages), "chunks_created": len(all_text_chunks)},
+                        )
+                    except Exception:
+                        pass
         else:
             # Fallback to page-by-page processing using paragraphs
             print(f"Using fallback page-by-page processing.")
@@ -768,16 +786,70 @@ class ProcessFile:
         return " ".join(text_content)
     
     def _get_relevant_paragraphs_for_chunk(self, paragraphs: list[DocumentParagraph], chunk_text: str) -> list[DocumentParagraph]:
-        """Find paragraphs that are most relevant to the current chunk (simplified approach)."""
+        """Find paragraphs that are most relevant to the current chunk with improved precision."""
         relevant = []
-        chunk_words = set(chunk_text.lower().split())
+        chunk_text_lower = chunk_text.lower()
         
+        # First, try to find paragraphs that contain substantial portions of the chunk text
         for paragraph in paragraphs or []:
-            para_words = set(paragraph.content.lower().split())
-            # If there's significant overlap, consider it relevant
-            overlap = len(chunk_words.intersection(para_words))
-            if overlap > min(3, len(para_words) * 0.3):  # At least 3 words or 30% overlap
+            para_content = paragraph.content.strip().lower()
+            if not para_content:
+                continue
+                
+            # Calculate how much of the paragraph content appears in the chunk
+            para_words = para_content.split()
+            if len(para_words) < 3:  # Skip very short paragraphs
+                continue
+                
+            # Check if significant portions of the paragraph appear in the chunk
+            # Use sliding window to find the longest matching subsequence
+            max_consecutive_matches = 0
+            current_consecutive = 0
+            
+            for word in para_words:
+                if word in chunk_text_lower:
+                    current_consecutive += 1
+                    max_consecutive_matches = max(max_consecutive_matches, current_consecutive)
+                else:
+                    current_consecutive = 0
+            
+            # Consider relevant if at least 50% of paragraph words match consecutively
+            # or if it's a short paragraph with high overlap
+            if (max_consecutive_matches >= len(para_words) * 0.5 or 
+                (len(para_words) <= 10 and max_consecutive_matches >= len(para_words) * 0.7)):
                 relevant.append(paragraph)
+        
+        # If no paragraphs found with the strict method, fall back to the original but with higher threshold
+        if not relevant:
+            chunk_words = set(chunk_text_lower.split())
+            for paragraph in paragraphs or []:
+                para_words = set(paragraph.content.lower().split())
+                if len(para_words) < 3:
+                    continue
+                    
+                # Use much higher threshold for word overlap
+                overlap = len(chunk_words.intersection(para_words))
+                overlap_ratio = overlap / len(para_words)
+                if overlap >= 5 and overlap_ratio >= 0.6:  # At least 5 words AND 60% overlap
+                    relevant.append(paragraph)
+        
+        # Limit the number of paragraphs to prevent massive highlighting
+        # Sort by relevance and take top 3
+        if len(relevant) > 3:
+            # Simple relevance scoring based on content length and overlap
+            scored_paragraphs = []
+            chunk_words = set(chunk_text_lower.split())
+            
+            for para in relevant:
+                para_words = set(para.content.lower().split())
+                overlap = len(chunk_words.intersection(para_words))
+                # Score based on overlap ratio and paragraph length (prefer more specific matches)
+                score = (overlap / len(para_words)) * (1.0 / max(1, len(para_words) / 20))  # Favor shorter, more specific paragraphs
+                scored_paragraphs.append((score, para))
+            
+            # Sort by score and take top 3
+            scored_paragraphs.sort(key=lambda x: x[0], reverse=True)
+            relevant = [para for _, para in scored_paragraphs[:3]]
         
         return relevant
 

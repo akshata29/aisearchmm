@@ -33,9 +33,10 @@ import {
     MoreHorizontal20Regular
 } from "@fluentui/react-icons";
 
-import { ProcessingStepsMessage, RoleType, Thread, ThreadType } from "../../../api/models";
+import { ProcessingStepsMessage, RoleType, Thread, ThreadType, Citation } from "../../../api/models";
 import "./ChatContent.css";
 import Citations from "../Citations/Citations";
+import CitationViewer from "../CitationViewer/CitationViewer";
 import ProcessingSteps from "../ProcessingSteps/ProcessingSteps";
 
 interface Props {
@@ -47,6 +48,8 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
     const [showProcessingSteps, setShowProcessingSteps] = useState(false);
     const [processRequestId, setProcessRequestId] = useState("");
     const [highlightedCitation, setHighlightedCitation] = useState<string | undefined>();
+    const [showCitationViewer, setShowCitationViewer] = useState(false);
+    const [selectedCitation, setSelectedCitation] = useState<Citation | undefined>();
     const [copiedMessages, setCopiedMessages] = useState<Set<string>>(new Set());
     const [likedMessages, setLikedMessages] = useState<Set<string>>(new Set());
     const [dislikedMessages, setDislikedMessages] = useState<Set<string>>(new Set());
@@ -88,35 +91,65 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
 
     // Enhanced citation handling with numbering
     const citationRegex = /\[([^\]]+)\]/g;
-    const citationHit = (index: number, docId: string) => {
-        return (
-            <span
-                key={index}
-                onMouseLeave={() => setHighlightedCitation(undefined)}
-                onMouseEnter={() => setHighlightedCitation(docId)}
-                className="citation-link"
-            >
-                <Badge 
-                    size="tiny" 
-                    color="brand"
-                    appearance="tint"
-                    className="citation-badge-modern"
-                >
-                    {Math.floor(index / 2) + 1}
-                </Badge>
-            </span>
-        );
-    };
 
-    const renderWithCitations = (children: React.ReactNode) => {
-        return React.Children.map(children, child => {
-            if (typeof child === "string") {
-                return child
-                    .split(citationRegex)
-                    .map((part, index) => (index % 2 === 0 ? part : index % 2 === 1 ? citationHit(index, part) : null));
-            }
-            return child;
-        });
+    const createCitationRenderer = (textCitations: Citation[], imageCitations: Citation[]) => {
+        return (children: React.ReactNode) => {
+            // Track unique citations and assign sequential numbers
+            const citationMap = new Map<string, number>();
+            let citationCounter = 1;
+            
+            // Combine all citations for lookup
+            const allCitations = [...textCitations, ...imageCitations];
+            
+            const handleCitationClick = (citationId: string) => {
+                // Find the citation by content_id
+                const citation = allCitations.find(c => c.content_id === citationId);
+                if (citation) {
+                    setSelectedCitation(citation);
+                    setShowCitationViewer(true);
+                }
+            };
+            
+            return React.Children.map(children, child => {
+                if (typeof child === "string") {
+                    return child
+                        .split(citationRegex)
+                        .map((part, index) => {
+                            if (index % 2 === 0) {
+                                return part; // Regular text
+                            } else if (index % 2 === 1) {
+                                // This is a citation ID
+                                if (!citationMap.has(part)) {
+                                    citationMap.set(part, citationCounter++);
+                                }
+                                const citationNumber = citationMap.get(part)!;
+                                
+                                return (
+                                    <span
+                                        key={`${part}-${index}`}
+                                        onMouseLeave={() => setHighlightedCitation(undefined)}
+                                        onMouseEnter={() => setHighlightedCitation(part)}
+                                        onClick={() => handleCitationClick(part)}
+                                        className="citation-link"
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <Badge 
+                                            size="tiny" 
+                                            color="brand"
+                                            appearance="tint"
+                                            className="citation-badge-modern"
+                                        >
+                                            {citationNumber}
+                                        </Badge>
+                                    </span>
+                                );
+                            }
+                            return null;
+                        });
+                }
+                return child;
+            });
+        };
     };
 
     const getCurProcessingStep = (requestId: string): Record<string, ProcessingStepsMessage[]> => {
@@ -285,7 +318,7 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                                                                             className="markdown-paragraph"
                                                                             style={isUser ? { color: 'white' } : {}}
                                                                         >
-                                                                            {renderWithCitations(children)}
+                                                                            {createCitationRenderer(textCitations, imageCitations)(children)}
                                                                         </Body1>
                                                                     ),
                                                                     h1: ({ children }) => (
@@ -318,7 +351,7 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                                                                             className="markdown-li"
                                                                             style={isUser ? { color: 'white' } : {}}
                                                                         >
-                                                                            {renderWithCitations(children)}
+                                                                            {createCitationRenderer(textCitations, imageCitations)(children)}
                                                                         </Body1>
                                                                     ),
                                                                     strong: ({ children }) => (
@@ -422,7 +455,7 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                                                                         icon={<BrainCircuit20Regular />}
                                                                         appearance="subtle"
                                                                         className="action-button"
-                                                                        disabled={Object.keys(processingStepMsg || {}).length === 0}
+                                                                        disabled={!processingStepMsg?.[message.request_id] || processingStepMsg[message.request_id].length === 0}
                                                                         onClick={() => {
                                                                             setShowProcessingSteps(true);
                                                                             setProcessRequestId(message.request_id);
@@ -443,14 +476,18 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                                                             </div>
                                                         </div>
                                                         
-                                                        <Divider className="citations-divider" />
-                                                        <div className="citations-section">
-                                                            <Citations
-                                                                imageCitations={imageCitations}
-                                                                textCitations={textCitations}
-                                                                highlightedCitation={highlightedCitation}
-                                                            />
-                                                        </div>
+                                                        {(imageCitations.length > 0 || textCitations.length > 0) && (
+                                                            <>
+                                                                <Divider className="citations-divider" />
+                                                                <div className="citations-section">
+                                                                    <Citations
+                                                                        imageCitations={imageCitations}
+                                                                        textCitations={textCitations}
+                                                                        highlightedCitation={highlightedCitation}
+                                                                    />
+                                                                </div>
+                                                            </>
+                                                        )}
                                                     </CardFooter>
                                                 )}
                                             </Card>
@@ -472,6 +509,17 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg })
                     setShowProcessingSteps(!showProcessingSteps);
                 }}
             />
+
+            {showCitationViewer && selectedCitation && (
+                <CitationViewer
+                    citation={selectedCitation}
+                    onClose={() => {
+                        setShowCitationViewer(false);
+                        setSelectedCitation(undefined);
+                    } } show={false} toggle={function (): void {
+                        throw new Error("Function not implemented.");
+                    } }                />
+            )}
         </div>
     );
 };

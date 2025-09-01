@@ -8,6 +8,7 @@ import Samples from "../components/search/Samples/Samples";
 import SearchInput from "../components/search/SearchInput/SearchInput";
 import { TabNavigation } from "../components/layout/TabNavigation/TabNavigation";
 import ProfessionalDocumentUpload from "../components/upload/DocumentUpload/DocumentUpload";
+import Admin from "../components/admin/Admin";
 import useChat from "../hooks/useChat";
 import useConfig from "../hooks/useConfig";
 import useTheme from "../hooks/useTheme";
@@ -74,9 +75,11 @@ function App() {
                                 </div>
                             </div>
                         </>
-                    ) : (
+                    ) : selectedTab === "upload" ? (
                         <ProfessionalDocumentUpload />
-                    )}
+                    ) : selectedTab === "admin" ? (
+                        <Admin />
+                    ) : null}
                 </div>
             </div>
         </FluentProvider>

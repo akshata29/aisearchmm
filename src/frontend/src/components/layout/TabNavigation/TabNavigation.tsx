@@ -22,6 +22,7 @@ export const TabNavigation = ({ selectedTab, onTabSelect }: TabNavigationProps) 
             <TabList selectedValue={selectedTab} onTabSelect={handleTabSelect}>
                 <Tab value="chat">Chat</Tab>
                 <Tab value="upload">Upload Documents</Tab>
+                <Tab value="admin">Admin</Tab>
             </TabList>
         </div>
     );

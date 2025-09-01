@@ -48,6 +48,7 @@ from azure.search.documents.agent.aio import KnowledgeAgentRetrievalClient
 from azure.core.pipeline.policies import UserAgentPolicy
 
 from azure.storage.blob.aio import BlobServiceClient
+from admin.admin_handler import AdminHandler
 
 from retrieval.search_grounding import SearchGroundingRetriever
 from retrieval.knowledge_agent import KnowledgeAgentGrounding
@@ -393,6 +394,9 @@ async def create_app():
         blob_service_client, samples_container_client
     )
 
+    # Initialize admin handler
+    admin_handler = AdminHandler()
+
     current_directory = Path(__file__).parent
     app.add_routes(
         [
@@ -409,6 +413,9 @@ async def create_app():
             web.get("/upload_status", upload_handler.handle_status),
         ]
     )
+    
+    # Attach admin routes
+    admin_handler.attach_to_app(app, search_client)
     app.router.add_static("/", path=current_directory / "static", name="static")
 
     return app

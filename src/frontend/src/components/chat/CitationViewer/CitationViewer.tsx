@@ -11,6 +11,7 @@ import PdfHighlighter from "../../shared/PdfHighlighter/PdfHighlighter";
 interface Props {
     show: boolean;
     citation: Citation;
+    onClose: () => void;
     toggle: () => void;
 }
 

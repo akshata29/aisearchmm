@@ -124,10 +124,15 @@ class MultimodalRag(RagBase):
             collected_documents = []
             for doc in grounding_results["references"]:
                 if doc["content_type"] == "text":
+                    # Format text documents as JSON objects with ref_id as expected by the system prompt
+                    text_doc = {
+                        "ref_id": doc["ref_id"],
+                        "content": doc["content"] if isinstance(doc["content"], str) else str(doc["content"])
+                    }
                     collected_documents.append(
                         {
                             "type": "text",
-                            "text": str(doc["content"]),
+                            "text": json.dumps(text_doc),
                         }
                     )
                 elif doc["content_type"] == "image":
