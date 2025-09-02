@@ -17,9 +17,9 @@ export default function useChat(config: SearchConfig) {
 
     const handleQuery = async (query: string) => {
         setIsLoading(true);
+        const request_id = new Date().getTime().toString();
+        
         try {
-            const request_id = new Date().getTime().toString();
-
             if (!chatId) setChatId(request_id);
 
             const chatThread = thread
@@ -73,12 +73,40 @@ export default function useChat(config: SearchConfig) {
                     }
                 },
                 err => {
-                    console.error(err);
-                    throw err;
+                    console.error('Chat stream error:', err);
+                    
+                    // Handle timeout errors specifically
+                    const errorMessage = err instanceof Error ? err.message : 'Chat request failed';
+                    const isTimeout = errorMessage.includes('timed out') || errorMessage.includes('timeout');
+                    
+                    // Add error message to thread
+                    setThread(prevThread => [...prevThread, {
+                        request_id: request_id,
+                        type: ThreadType.Error,
+                        message: isTimeout 
+                            ? 'Request timed out. Large documents may need more time to process. Please try again or contact support.'
+                            : 'Chat request failed. Please try again.',
+                        role: RoleType.Assistant
+                    }]);
+                    
+                    setIsLoading(false);
                 }
             );
         } catch (err) {
-            console.error(err);
+            console.error('Chat error:', err);
+            
+            // Handle any other errors
+            const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+            const isTimeout = errorMessage.includes('timed out') || errorMessage.includes('timeout');
+            
+            setThread(prevThread => [...prevThread, {
+                request_id: request_id,
+                type: ThreadType.Error,
+                message: isTimeout 
+                    ? 'Request timed out. Large documents may need more time to process. Please try again or contact support.'
+                    : 'An unexpected error occurred. Please try again.',
+                role: RoleType.Assistant
+            }]);
         } finally {
             setIsLoading(false);
         }

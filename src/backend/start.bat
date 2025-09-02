@@ -1,1 +1,1 @@
-py .\app.py
+py .\dev_server.py

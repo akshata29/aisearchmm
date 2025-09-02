@@ -51,7 +51,7 @@ class AdminHandler:
     - Structured responses
     """
 
-    def __init__(self, max_batch_size: int = 1000, timeout_seconds: int = 30):
+    def __init__(self, max_batch_size: int = 10000, timeout_seconds: int = 30):
         """
         Initialize AdminHandler with production configurations.
         
@@ -446,7 +446,7 @@ class AdminHandler:
 
             # Optional pagination parameters
             try:
-                limit = min(int(request.query.get("limit", 1000)), self.max_batch_size)
+                limit = min(int(request.query.get("limit", 10000)), self.max_batch_size)
                 offset = max(int(request.query.get("offset", 0)), 0)
             except ValueError:
                 return web.json_response({

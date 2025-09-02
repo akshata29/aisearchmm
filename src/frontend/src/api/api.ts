@@ -1,6 +1,7 @@
 import { EventSourceMessage, fetchEventSource } from "@microsoft/fetch-event-source";
 
 import { SearchConfig } from "../components/search/SearchSettings/SearchSettings";
+import { TIMEOUTS } from "../constants/app";
 
 const sendChatApi = async (
     message: string,
@@ -12,12 +13,43 @@ const sendChatApi = async (
 ) => {
     const endpoint = "/chat";
 
+    // Create AbortController for timeout handling
+    const controller = new AbortController();
+    
+    // Set up timeout - use PROCESSING timeout for chat as it involves complex operations
+    const timeoutId = setTimeout(() => {
+        controller.abort();
+    }, TIMEOUTS.PROCESSING);
+    
+    // Enhanced error handler that clears timeout and handles abort
+    const enhancedErrorHandler = (error: any) => {
+        clearTimeout(timeoutId);
+        
+        if (controller.signal.aborted) {
+            const timeoutError = new Error('Chat request timed out. Large document processing may need more time.');
+            console.error('Chat API Timeout:', timeoutError);
+            onError?.(timeoutError);
+        } else {
+            console.error('Chat API Stream Error:', error);
+            onError?.(error);
+        }
+    };
+    
+    // Enhanced message handler that clears timeout on END event
+    const enhancedMessageHandler = (message: EventSourceMessage) => {
+        if (message.event === '[END]') {
+            clearTimeout(timeoutId);
+        }
+        onMessage(message);
+    };
+
     await fetchEventSource(endpoint, {
         openWhenHidden: true,
         method: "POST",
         body: JSON.stringify({ query: message, request_id: requestId, chatThread: chatThread, config }),
-        onerror: onError,
-        onmessage: onMessage
+        signal: controller.signal,
+        onerror: enhancedErrorHandler,
+        onmessage: enhancedMessageHandler
     });
 };
 

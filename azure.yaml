@@ -22,11 +22,16 @@ hooks:
   postprovision:
     windows:
       shell: pwsh
-      run: ./scripts/prepdocs.ps1
+      run: |
+        ./scripts/prepdocs.ps1
+        ./scripts/setup-local-env.ps1 -Force
       interactive: true
       continueOnError: false
     posix:
       shell: sh
-      run: ./scripts/prepdocs.sh
+      run: |
+        ./scripts/prepdocs.sh
+        chmod +x ./scripts/setup-local-env.sh
+        ./scripts/setup-local-env.sh --force
       interactive: true
       continueOnError: false

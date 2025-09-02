@@ -6,11 +6,13 @@
 - [Azure AI Search Multimodal RAG Demo](#azure-ai-search-multimodal-rag-demo)
 - [Azure AI Search Portal: Bring your own index and resources](#azure-ai-search-portal-bring-your-own-index-and-resources)
 - [Getting Started](#getting-started)
+   - [Local Development Quick Start](#local-development-quick-start)
    - [General Requirements](#general-requirements)
 - [Environment setup](#environment-setup)
    - [Github codespaces](#github-codespaces)
    - [Local development setup (Windows or Linux)](#local-development-setup-windows-or-linux)
    - [Provision resources and deploy working app](#provision-resources-and-deploy-working-app)
+   - [Generate .env file for existing deployments](#generate-env-file-for-existing-deployments)
    - [Debug app locally](#debug-app-locally)
    - [Bring your own data (supports .pdf only)](#bring-your-own-data-supports-pdf-only)
 - [Azure Services Used for Deployment](#azure-services-used-for-deployment)
@@ -113,6 +115,45 @@ You can create an index using the AI Search portal's quick wizard for the multim
 
 ## Getting Started
 
+### Local Development Quick Start
+
+If you have already deployed the Azure resources and want to run the application locally for development:
+
+#### Prerequisites (One-time Setup)
+1. **Python Environment Setup**:
+   - Install [Python 3.12.7](https://www.python.org/downloads/release/python-3127/)
+   - Navigate to `src/backend` directory
+   - Install dependencies: `pip install -r requirements.txt`
+
+2. **Frontend Setup**:
+   - Install [Node.js > v.18](https://nodejs.org/)
+   - Navigate to `src/frontend` directory
+   - Install dependencies: `npm install`
+
+3. **Environment Configuration**:
+   - **Option A (Automatic)**: If you deployed using `azd up`, your `.env` file was automatically created
+   - **Option B (Manual)**: Run the setup script to generate `.env`:
+     - Windows: `scripts/setup-local-env.ps1 -EnvironmentName <YOUR_ENV_NAME>`
+     - Linux/macOS: `./scripts/setup-local-env.sh --environment <YOUR_ENV_NAME>`
+   - **Option C (Manual)**: Copy `src/backend/.env.template` to `src/backend/.env` and populate manually
+
+#### Running the Application Locally
+Once the one-time setup is complete, follow these steps to run the application:
+
+1. **Start the Backend Server**:
+   - Open a terminal in the `src/backend` directory
+   - Run: `start.bat` (this starts the Python backend server)
+
+2. **Start the Frontend Development Server**:
+   - Open a second terminal in the `src/frontend` directory  
+   - Run: `npm run dev` (this starts the Vite development server)
+
+3. **Access the Application**:
+   - Frontend will be available at the URL shown in the terminal (typically `http://localhost:5173`)
+   - Backend API will be running on `http://localhost:5000`
+
+> **Note**: Make sure your `.env` file is properly configured with all Azure service endpoints and credentials before starting the servers.
+
 ### General Requirements  
 To deploy and run this application, you will need the following:  
   
@@ -151,32 +192,58 @@ Install the below tools
   - Run ```azd auth login```
   - Run ```azd env new <YOUR_ENVIRONMENT_NAME>```
   - Run ```azd env set AZURE_PRINCIPAL_ID  <USER_OBJECT_ID>``` (This needs to user's object ID from Azure Entra ID. Alternate you can use command from your local development box ```az ad signed-in-user show --query id -o tsv``` )
-  - Run ```azd up```. This command will
+  - Run ```azd up```. This command will:
     - Provision the azure resources
     - Package the application
-    - Injest data into azure search index
+    - Ingest data into azure search index
     - Deploy the working app to webApp services
+    - **Automatically generate a `.env` file** for local development with all necessary API keys and configuration
   - NOTE: You might encounter provisioning errors on cohere. Please visit troubleshooting section for more details.
   - Once deployment succeeds, you can use the app.
-  
+
+> **✨ New**: The deployment process now automatically creates a `.env` file in `src/backend/.env` with all the required configuration for local development, including API keys fetched from the deployed Azure services.
+
 !['Output from running azd up'](docs/images/app_depl_success.png)
 
 NOTE: It may take 5-10 minutes after you see 'SUCCESS' for the application to be fully deployed. If you see a "Python Developer" welcome screen or an error page, then wait a bit and refresh the page.
 
+### Generate .env file for existing deployments
+If you have an existing deployment and need to generate or update your local `.env` file:
+
+**On Windows:**
+```powershell
+scripts/setup-local-env.ps1 -EnvironmentName <YOUR_ENVIRONMENT_NAME>
+```
+
+**On Linux/macOS:**
+```bash
+./scripts/setup-local-env.sh --environment <YOUR_ENVIRONMENT_NAME>
+```
+
+This script will:
+- Fetch all necessary API keys from your deployed Azure services
+- Generate a complete `.env` file with proper configuration
+- Include all performance, security, and monitoring settings
+
+> **📖 For detailed information** about the automated setup process, troubleshooting, and configuration options, see [Local Development Setup Guide](docs/local-development-setup.md).
+
 
 ### Debug app locally
-- You need to ***provision all the resources*** before your start to debug app locally
+- You need to ***provision all the resources*** before you start to debug app locally
+- After running `azd up`, your `.env` file will be automatically created with all necessary configuration
 - To launch the app locally, run the below command. The website will open automatically and be served at [localhost:5000](http://localhost:5000).
 
-- **On Windows:**
-   ```powershell
-   src/start.ps1
-   ```
+**On Windows:**
+```powershell
+src/start.ps1
+```
 
-- **On Linux:**
-   ```bash
-   src/start.sh
-   ```
+**On Linux:**
+```bash
+src/start.sh
+```
+
+> **Note**: If you don't have a `.env` file or need to regenerate it, use the setup scripts mentioned in the [Generate .env file](#generate-env-file-for-existing-deployments) section above.
 
 ### Bring your own data (supports .pdf only)
 - To index your own data,

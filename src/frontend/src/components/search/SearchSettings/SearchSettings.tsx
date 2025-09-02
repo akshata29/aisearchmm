@@ -65,6 +65,9 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
         { key: 'policy_document', text: 'Policy Document' },
         { key: 'manual', text: 'Manual' },
         { key: 'guide', text: 'Guide' },
+        { key: 'client_reviews', text: 'Client Reviews' },
+        { key: 'nyp_columns', text: 'NYP Columns' },
+        { key: 'otq', text: 'Only Three Questions' },
         { key: 'other', text: 'Other' }
     ];
 
@@ -112,10 +115,33 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     };
 
     const handleDocumentTypesChange = (newTypes: string[]) => {
+        // Ensure proper ordering: otq, nyp_columns, client_reviews first, then others
+        const orderedTypes = orderDocumentTypes(newTypes);
         setConfig(prev => ({
             ...prev,
-            preferred_document_types: newTypes
+            preferred_document_types: orderedTypes
         }));
+    };
+
+    const orderDocumentTypes = (types: string[]): string[] => {
+        const priorityOrder = ["otq", "nyp_columns", "client_reviews"];
+        const orderedTypes: string[] = [];
+        
+        // Add priority types first if they exist in the list
+        for (const priorityType of priorityOrder) {
+            if (types.includes(priorityType)) {
+                orderedTypes.push(priorityType);
+            }
+        }
+        
+        // Add remaining types that are not in priority list
+        for (const docType of types) {
+            if (!priorityOrder.includes(docType) && !orderedTypes.includes(docType)) {
+                orderedTypes.push(docType);
+            }
+        }
+        
+        return orderedTypes;
     };
 
     const addDocumentType = (type: string) => {
@@ -136,6 +162,13 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
             handleDocumentTypesChange([...currentTypes, selectedKey]);
         }
     };
+
+    // Ensure default document types are set if none exist
+    React.useEffect(() => {
+        if (!config.preferred_document_types || config.preferred_document_types.length === 0) {
+            handleDocumentTypesChange(["otq", "nyp_columns", "client_reviews"]);
+        }
+    }, []);
 
     return (
         <div className="input-container">
@@ -190,6 +223,72 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
                 </Text>
             </div>
 
+            {/* Document Type Filtering - Available for both Knowledge Agent and Search Grounding */}
+            <div className="input-group">
+                <Label htmlFor="DocumentTypesDropdown">Preferred document types</Label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginBottom: "8px" }}>
+                    {(config.preferred_document_types || []).map((type, index) => {
+                        const typeOption = documentTypeOptions.find(opt => opt.key === type);
+                        const displayText = typeOption ? typeOption.text : type;
+                        return (
+                            <div key={index} style={{ 
+                                display: "inline-flex", 
+                                alignItems: "center", 
+                                padding: "2px 8px", 
+                                backgroundColor: "var(--colorNeutralBackground1Selected)",
+                                borderRadius: "12px",
+                                fontSize: "12px",
+                                border: "1px solid var(--colorNeutralStroke2)"
+                            }}>
+                                <span>{displayText}</span>
+                                <Button
+                                    appearance="transparent"
+                                    size="small"
+                                    icon={<Dismiss24Regular />}
+                                    onClick={() => removeDocumentType(type)}
+                                    style={{ marginLeft: "4px", minWidth: "16px", height: "16px" }}
+                                />
+                            </div>
+                        );
+                    })}
+                </div>
+                <Dropdown
+                    id="documentTypesDropdown"
+                    placeholder="Select document type to add"
+                    onOptionSelect={(_, data) => {
+                        if (data.optionValue) {
+                            addDocumentTypeFromDropdown(data.optionValue);
+                        }
+                    }}
+                >
+                    {documentTypeOptions
+                        .filter(option => !(config.preferred_document_types || []).includes(option.key))
+                        .map((option) => (
+                            <Option key={option.key} value={option.key}>
+                                {option.text}
+                            </Option>
+                        ))
+                    }
+                </Dropdown>
+                <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
+                    {config.use_knowledge_agent 
+                        ? "Select document types to prioritize in search results. Defaults to: Only Three Questions, NYP Columns, Client Reviews." 
+                        : "Select document types to filter and prioritize in search results. Defaults to: Only Three Questions, NYP Columns, Client Reviews."}
+                </Text>
+                <Input
+                    placeholder="Or type custom document type and press Enter"
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                        if (e.key === "Enter") {
+                            e.preventDefault();
+                            const input = e.target as HTMLInputElement;
+                            addDocumentType(input.value);
+                            input.value = "";
+                        }
+                    }}
+                    style={{ marginTop: "8px" }}
+                />
+            </div>
+
             {/* Knowledge Agent specific settings */}
             {config.use_knowledge_agent && (
                 <>
@@ -218,69 +317,6 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
                             Adjusts reranker thresholds and document count for retrieval. 
                             Final results will be limited to your "Top chunks count" setting ({config.chunk_count}).
                         </Text>
-                    </div>
-
-                    <div className="input-group">
-                        <Label htmlFor="DocumentTypesDropdown">Preferred document types</Label>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginBottom: "8px" }}>
-                            {(config.preferred_document_types || []).map((type, index) => {
-                                const typeOption = documentTypeOptions.find(opt => opt.key === type);
-                                const displayText = typeOption ? typeOption.text : type;
-                                return (
-                                    <div key={index} style={{ 
-                                        display: "inline-flex", 
-                                        alignItems: "center", 
-                                        padding: "2px 8px", 
-                                        backgroundColor: "var(--colorNeutralBackground1Selected)",
-                                        borderRadius: "12px",
-                                        fontSize: "12px",
-                                        border: "1px solid var(--colorNeutralStroke2)"
-                                    }}>
-                                        <span>{displayText}</span>
-                                        <Button
-                                            appearance="transparent"
-                                            size="small"
-                                            icon={<Dismiss24Regular />}
-                                            onClick={() => removeDocumentType(type)}
-                                            style={{ marginLeft: "4px", minWidth: "16px", height: "16px" }}
-                                        />
-                                    </div>
-                                );
-                            })}
-                        </div>
-                        <Dropdown
-                            id="documentTypesDropdown"
-                            placeholder="Select document type to add"
-                            onOptionSelect={(_, data) => {
-                                if (data.optionValue) {
-                                    addDocumentTypeFromDropdown(data.optionValue);
-                                }
-                            }}
-                        >
-                            {documentTypeOptions
-                                .filter(option => !(config.preferred_document_types || []).includes(option.key))
-                                .map((option) => (
-                                    <Option key={option.key} value={option.key}>
-                                        {option.text}
-                                    </Option>
-                                ))
-                            }
-                        </Dropdown>
-                        <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
-                            Select document types to prioritize in search results. You can also type custom types below.
-                        </Text>
-                        <Input
-                            placeholder="Or type custom document type and press Enter"
-                            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                                if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    const input = e.target as HTMLInputElement;
-                                    addDocumentType(input.value);
-                                    input.value = "";
-                                }
-                            }}
-                            style={{ marginTop: "8px" }}
-                        />
                     </div>
 
                     <Switch

@@ -107,6 +107,36 @@ export async function sendChatApi(
     const request: Omit<ChatRequest, 'query' | 'request_id' | 'chat_history'> = { config };
     
     try {
+        // Create AbortController for timeout handling
+        const controller = new AbortController();
+        
+        // Set up timeout - use PROCESSING timeout for chat as it involves complex operations
+        const timeoutId = setTimeout(() => {
+            controller.abort();
+        }, TIMEOUTS.PROCESSING);
+        
+        // Enhanced error handler that clears timeout and handles abort
+        const enhancedErrorHandler = (error: any) => {
+            clearTimeout(timeoutId);
+            
+            if (controller.signal.aborted) {
+                const timeoutError = new Error('Chat request timed out. Large document processing may need more time.');
+                logError(timeoutError, 'Chat API Timeout');
+                onError?.(timeoutError);
+            } else {
+                logError(error, 'Chat API Stream');
+                onError?.(new Error('Chat stream error'));
+            }
+        };
+        
+        // Enhanced message handler that clears timeout on END event
+        const enhancedMessageHandler = (message: any) => {
+            if (message.event === '[END]') {
+                clearTimeout(timeoutId);
+            }
+            onMessage(message);
+        };
+
         await fetchEventSource(API_ENDPOINTS.CHAT, {
             openWhenHidden: true,
             method: 'POST',
@@ -117,11 +147,9 @@ export async function sendChatApi(
                 chatThread,
                 ...request
             }),
-            onmessage: onMessage,
-            onerror: (error) => {
-                logError(error, 'Chat API Stream');
-                onError?.(new Error('Chat stream error'));
-            },
+            signal: controller.signal,
+            onmessage: enhancedMessageHandler,
+            onerror: enhancedErrorHandler,
         });
     } catch (error) {
         logError(error, 'Chat API');
@@ -172,21 +200,38 @@ export async function uploadFiles(files: File[]): Promise<UploadResponse> {
             formData.append(`file_${index}`, file);
         });
 
-        const response = await fetch(API_ENDPOINTS.UPLOAD, {
-            method: 'POST',
-            body: formData,
-            credentials: 'same-origin',
-        });
+        // Use AbortController for timeout handling with extended timeout for uploads
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.UPLOAD);
 
-        if (!response.ok) {
-            throw new ApiError(
-                'Upload failed',
-                response.status,
-                `HTTP_${response.status}`
-            );
+        try {
+            const response = await fetch(API_ENDPOINTS.UPLOAD, {
+                method: 'POST',
+                body: formData,
+                credentials: 'same-origin',
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new ApiError(
+                    'Upload failed',
+                    response.status,
+                    `HTTP_${response.status}`
+                );
+            }
+
+            return await response.json();
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            
+            if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+                throw new ApiError('Upload timeout - file too large or network slow', 408, 'UPLOAD_TIMEOUT');
+            }
+            
+            throw fetchError;
         }
-
-        return await response.json();
     } catch (error) {
         logError(error, 'Upload Files API');
         throw error;
@@ -217,21 +262,38 @@ export async function processDocuments(request: ProcessDocumentRequest): Promise
             formData.append(`file_${index}`, file);
         });
 
-        const response = await fetch(API_ENDPOINTS.PROCESS_DOCUMENT, {
-            method: 'POST',
-            body: formData,
-            credentials: 'same-origin',
-        });
+        // Use AbortController for timeout handling with extended timeout for processing
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.PROCESSING);
 
-        if (!response.ok) {
-            throw new ApiError(
-                'Document processing failed',
-                response.status,
-                `HTTP_${response.status}`
-            );
+        try {
+            const response = await fetch(API_ENDPOINTS.PROCESS_DOCUMENT, {
+                method: 'POST',
+                body: formData,
+                credentials: 'same-origin',
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new ApiError(
+                    'Document processing failed',
+                    response.status,
+                    `HTTP_${response.status}`
+                );
+            }
+
+            return await response.json();
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            
+            if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+                throw new ApiError('Document processing timeout - large document may need more time', 408, 'PROCESSING_TIMEOUT');
+            }
+            
+            throw fetchError;
         }
-
-        return await response.json();
     } catch (error) {
         logError(error, 'Process Documents API');
         throw error;

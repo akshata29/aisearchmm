@@ -112,7 +112,8 @@ class ProcessFile:
             valid_types = {
                 "quarterly_report", "newsletter", "articles", "annual_report", 
                 "financial_statement", "presentation", "whitepaper", "research_report", 
-                "policy_document", "manual", "guide", "other"
+                "policy_document", "manual", "guide", "client_reviews", "nyp_columns", 
+                "otq", "other"
             }
             normalized_type = document_type.lower().strip()
             if normalized_type in valid_types:

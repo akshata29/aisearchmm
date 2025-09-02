@@ -43,6 +43,7 @@ import {
 } from '@fluentui/react-icons';
 import './DocumentUpload.css';
 import { deleteIndex as deleteIndexApi } from '../../../api/api';
+import { TIMEOUTS } from '../../../constants/app';
 
 interface ProcessingDetails {
     steps: Array<{
@@ -111,6 +112,9 @@ const ProfessionalDocumentUpload: React.FC = () => {
         { key: 'policy_document', text: 'Policy Document' },
         { key: 'manual', text: 'Manual' },
         { key: 'guide', text: 'Guide' },
+        { key: 'client_reviews', text: 'Client Reviews' },
+        { key: 'nyp_columns', text: 'NYP Columns' },
+        { key: 'otq', text: 'Only Three Questions' },
         { key: 'other', text: 'Other' }
     ];
 
@@ -154,17 +158,26 @@ const ProfessionalDocumentUpload: React.FC = () => {
 
         const poll = async () => {
             try {
-                const response = await fetch(`/upload_status?upload_id=${uploadId}`);
-                const result = await response.json();
+                // Add timeout for status polling
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
 
-                if (response.ok) {
-                    setUploadProgress(result);
+                try {
+                    const response = await fetch(`/upload_status?upload_id=${uploadId}`, {
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    
+                    const result = await response.json();
 
-                    if (result.status === 'completed') {
-                        setMessage({ type: 'success', text: 'Document processed successfully!' });
-                        setUploading(false);
-                        return;
-                    } else if (result.status === 'error') {
+                    if (response.ok) {
+                        setUploadProgress(result);
+
+                        if (result.status === 'completed') {
+                            setMessage({ type: 'success', text: 'Document processed successfully!' });
+                            setUploading(false);
+                            return;
+                        } else if (result.status === 'error') {
                         setMessage({ type: 'error', text: result.message || 'Processing failed' });
                         setUploading(false);
                         return;
@@ -177,6 +190,15 @@ const ProfessionalDocumentUpload: React.FC = () => {
                 } else if (attempts >= maxAttempts) {
                     setMessage({ type: 'error', text: 'Processing timeout' });
                     setUploading(false);
+                }
+                } catch (fetchError) {
+                    clearTimeout(timeoutId);
+                    
+                    if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+                        console.error('Status polling timeout');
+                    }
+                    
+                    throw fetchError;
                 }
             } catch (error) {
                 console.error('Status polling error:', error);
@@ -269,16 +291,26 @@ const ProfessionalDocumentUpload: React.FC = () => {
             const formData = new FormData();
             formData.append('file', selectedFile);
 
+            // Upload with timeout
+            const uploadController = new AbortController();
+            const uploadTimeoutId = setTimeout(() => uploadController.abort(), TIMEOUTS.UPLOAD);
+
             const uploadResponse = await fetch('/upload', {
                 method: 'POST',
                 body: formData,
+                signal: uploadController.signal,
             });
 
+            clearTimeout(uploadTimeoutId);
             const uploadResult = await uploadResponse.json();
 
             if (!uploadResponse.ok) {
                 throw new Error(uploadResult.error || 'Upload failed');
             }
+
+            // Process document with timeout
+            const processController = new AbortController();
+            const processTimeoutId = setTimeout(() => processController.abort(), TIMEOUTS.PROCESSING);
 
             const processResponse = await fetch('/process_document', {
                 method: 'POST',
@@ -294,7 +326,10 @@ const ProfessionalDocumentUpload: React.FC = () => {
                     output_format: outputFormat,
                     chunking_strategy: chunkingStrategy,
                 }),
+                signal: processController.signal,
             });
+
+            clearTimeout(processTimeoutId);
 
             const processResult = await processResponse.json();
 
@@ -306,6 +341,15 @@ const ProfessionalDocumentUpload: React.FC = () => {
 
         } catch (error) {
             setUploading(false);
+            
+            // Handle timeout errors specifically
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                const timeoutMessage = 'Operation timed out. Large documents may need more time to process.';
+                setMessage({ type: 'error', text: timeoutMessage });
+                setUploadProgress((prev) => prev ? prev : ({ status: 'error', message: timeoutMessage, progress: 100 } as UploadProgress));
+                return;
+            }
+            
             const text = error instanceof Error ? error.message : 'Upload failed';
             const pretty = prettifyError(text);
             setMessage({ type: 'error', text: pretty.summary });

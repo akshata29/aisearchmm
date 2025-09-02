@@ -34,7 +34,7 @@ resource search 'Microsoft.Search/searchServices@2023-11-01' = {
   location: location
   identity: searchIdentityProvider
   properties: {
-    disableLocalAuth: true
+    disableLocalAuth: false
     hostingMode: hostingMode
     partitionCount: partitionCount
     publicNetworkAccess: publicNetworkAccess

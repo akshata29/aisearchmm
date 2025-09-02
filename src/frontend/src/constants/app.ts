@@ -49,8 +49,8 @@ export const DEFAULT_SEARCH_CONFIG = {
 // Timeouts and limits
 export const TIMEOUTS = {
     API_REQUEST: 30000,
-    UPLOAD: 300000,
-    PROCESSING: 600000
+    UPLOAD: 600000,         // Increased from 5 minutes to 10 minutes for large files
+    PROCESSING: 1200000     // Increased from 10 minutes to 20 minutes for large document processing
 } as const;
 
 export const LIMITS = {

@@ -59,6 +59,36 @@ class SearchGroundingRetriever(GroundingRetriever):
                 await processing_step_callback(f"⚠️ Configuration warning: {warning}")
 
         try:
+            # Log document type filtering information
+            preferred_doc_types = options.get("preferred_document_types", [])
+            if not preferred_doc_types:
+                logger.info("Search grounding: Using default document types: otq, nyp_columns, client_reviews")
+                if processing_step_callback:
+                    await processing_step_callback("📋 Using default document types: Only Three Questions, NYP Columns, Client Reviews")
+            else:
+                # Ensure proper ordering
+                ordered_doc_types = self._order_document_types(preferred_doc_types)
+                if ordered_doc_types != preferred_doc_types:
+                    # Update the options to use the properly ordered types
+                    options = {**options, "preferred_document_types": ordered_doc_types}
+                    logger.info(f"Search grounding: Reordered document types: {ordered_doc_types}")
+                else:
+                    logger.info(f"Search grounding: Filtering by document types: {preferred_doc_types}")
+                
+                if processing_step_callback:
+                    type_names = []
+                    for doc_type in ordered_doc_types:
+                        if doc_type == "otq":
+                            type_names.append("Only Three Questions")
+                        elif doc_type == "nyp_columns":
+                            type_names.append("NYP Columns")
+                        elif doc_type == "client_reviews":
+                            type_names.append("Client Reviews")
+                        else:
+                            type_names.append(doc_type.replace("_", " ").title())
+                    await processing_step_callback(f"📋 Filtering document types: {', '.join(type_names)}")
+
+            # Recreate payload with potentially updated options
             payload = self.data_model.create_search_payload(query, options)
 
             search_kwargs = {
@@ -94,8 +124,14 @@ class SearchGroundingRetriever(GroundingRetriever):
                 scoring_info = f" using scoring profile '{search_kwargs.get('scoring_profile', '')}'" if "scoring_profile" in search_kwargs else ""
                 filter_info = f" (vector filter: {search_kwargs.get('vector_filter_mode', 'none')})" if "vector_filter_mode" in search_kwargs else ""
                 
+                # Add information about document type filtering
+                filter_applied = search_kwargs.get("filter", "")
+                doc_type_info = ""
+                if filter_applied and "document_type eq" in filter_applied:
+                    doc_type_info = " with document type filtering"
+                
                 await processing_step_callback(
-                    f"Executing {search_type} Azure AI Search{semantic_info}{scoring_info}{filter_info}..."
+                    f"Executing {search_type} Azure AI Search{semantic_info}{scoring_info}{filter_info}{doc_type_info}..."
                 )
                 
             search_results = await self.search_client.search(**search_kwargs)
@@ -611,3 +647,20 @@ For hybrid search scenarios, focus on:
                 ref = references[ref_id]
                 extracted_citations.append(self.data_model.extract_citation(ref))
         return extracted_citations
+
+    def _order_document_types(self, doc_types: List[str]) -> List[str]:
+        """Ensure document types follow the preferred order: otq, nyp_columns, client_reviews, then others."""
+        priority_order = ["otq", "nyp_columns", "client_reviews"]
+        ordered_types = []
+        
+        # Add priority types first if they exist in the list
+        for priority_type in priority_order:
+            if priority_type in doc_types:
+                ordered_types.append(priority_type)
+        
+        # Add remaining types that are not in priority list
+        for doc_type in doc_types:
+            if doc_type not in priority_order and doc_type not in ordered_types:
+                ordered_types.append(doc_type)
+        
+        return ordered_types

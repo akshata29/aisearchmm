@@ -80,6 +80,23 @@ class DocumentPerChunkDataModel(DataModel):
             recency_filter = f"published_date ge {cutoff_date_str}"
             filters.append(recency_filter)
         
+        # Add document type preferences with default ordering
+        preferred_doc_types = search_config.get("preferred_document_types", [])
+        
+        # If no document types specified, default to the core 3 in order
+        if not preferred_doc_types:
+            preferred_doc_types = ["otq", "nyp_columns", "client_reviews"]
+        else:
+            # Ensure proper ordering: otq, nyp_columns, client_reviews first, then others
+            preferred_doc_types = self._order_document_types(preferred_doc_types)
+        
+        if preferred_doc_types:
+            type_filters = [f"document_type eq '{doc_type}'" for doc_type in preferred_doc_types]
+            if len(type_filters) == 1:
+                filters.append(type_filters[0])
+            else:
+                filters.append(f"({' or '.join(type_filters)})")
+        
         # Add any additional filters
         additional_filters = search_config.get("additional_filters", [])
         if additional_filters:
@@ -186,6 +203,23 @@ class DocumentPerChunkDataModel(DataModel):
             recency_filter = f"published_date ge {cutoff_date_str}"
             filters.append(recency_filter)
         
+        # Add document type preferences with default ordering
+        preferred_doc_types = search_config.get("preferred_document_types", [])
+        
+        # If no document types specified, default to the core 3 in order
+        if not preferred_doc_types:
+            preferred_doc_types = ["otq", "nyp_columns", "client_reviews"]
+        else:
+            # Ensure proper ordering: otq, nyp_columns, client_reviews first, then others
+            preferred_doc_types = self._order_document_types(preferred_doc_types)
+        
+        if preferred_doc_types:
+            type_filters = [f"document_type eq '{doc_type}'" for doc_type in preferred_doc_types]
+            if len(type_filters) == 1:
+                filters.append(type_filters[0])
+            else:
+                filters.append(f"({' or '.join(type_filters)})")
+        
         # Add any additional filters
         additional_filters = search_config.get("additional_filters", [])
         if additional_filters:
@@ -197,6 +231,23 @@ class DocumentPerChunkDataModel(DataModel):
             payload["filter"] = filter_string
 
         return payload
+
+    def _order_document_types(self, doc_types: List[str]) -> List[str]:
+        """Ensure document types follow the preferred order: otq, nyp_columns, client_reviews, then others."""
+        priority_order = ["otq", "nyp_columns", "client_reviews"]
+        ordered_types = []
+        
+        # Add priority types first if they exist in the list
+        for priority_type in priority_order:
+            if priority_type in doc_types:
+                ordered_types.append(priority_type)
+        
+        # Add remaining types that are not in priority list
+        for doc_type in doc_types:
+            if doc_type not in priority_order and doc_type not in ordered_types:
+                ordered_types.append(doc_type)
+        
+        return ordered_types
 
     def validate_search_configuration(self, search_config: SearchConfig) -> List[str]:
         """

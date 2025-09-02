@@ -135,8 +135,18 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             filters.append(recency_filter)
             logger.info(f"Applied hard recency filter: documents published after {cutoff_date.isoformat()}")
         
-        # Priority 2: Document type preferences
+        # Priority 2: Document type preferences with default ordering
         preferred_doc_types = options.get("preferred_document_types", [])
+        
+        # If no document types specified, default to the core 3 in order
+        if not preferred_doc_types:
+            preferred_doc_types = ["otq", "nyp_columns", "client_reviews"]
+            logger.info("No document types specified, defaulting to: otq, nyp_columns, client_reviews")
+        else:
+            # Ensure proper ordering: otq, nyp_columns, client_reviews first, then others
+            preferred_doc_types = self._order_document_types(preferred_doc_types)
+            logger.info(f"Document types ordered: {preferred_doc_types}")
+        
         if preferred_doc_types:
             type_filters = [f"document_type eq '{doc_type}'" for doc_type in preferred_doc_types]
             if len(type_filters) == 1:
@@ -149,6 +159,23 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         filters.extend(additional_filters)
         
         return " and ".join(filters) if filters else None
+
+    def _order_document_types(self, doc_types: List[str]) -> List[str]:
+        """Ensure document types follow the preferred order: otq, nyp_columns, client_reviews, then others."""
+        priority_order = ["otq", "nyp_columns", "client_reviews"]
+        ordered_types = []
+        
+        # Add priority types first if they exist in the list
+        for priority_type in priority_order:
+            if priority_type in doc_types:
+                ordered_types.append(priority_type)
+        
+        # Add remaining types that are not in priority list
+        for doc_type in doc_types:
+            if doc_type not in priority_order and doc_type not in ordered_types:
+                ordered_types.append(doc_type)
+        
+        return ordered_types
 
     def _determine_reranker_params(self, options: dict) -> Dict[str, Any]:
         """Determine semantic reranker parameters based on query complexity and options."""

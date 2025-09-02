@@ -31,6 +31,7 @@ import {
     AlertRegular,
 } from '@fluentui/react-icons';
 import './Admin.css';
+import { TIMEOUTS } from '../../constants/app';
 
 interface DocumentStats {
     document_title: string;
@@ -77,14 +78,27 @@ export const Admin: React.FC = () => {
         try {
             setLoading(true);
             setError(null);
-            const response = await fetch('/api/admin/documents');
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
+            
+            const response = await fetch('/api/admin/documents', {
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
             if (!response.ok) {
                 throw new Error(`Failed to fetch statistics: ${response.statusText}`);
             }
             const data = await response.json();
             setStats(data);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to fetch statistics');
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                setError('Request timed out while fetching document statistics');
+            } else {
+                setError(err instanceof Error ? err.message : 'Failed to fetch statistics');
+            }
         } finally {
             setLoading(false);
         }
@@ -103,7 +117,16 @@ export const Admin: React.FC = () => {
         try {
             setChunksLoading(true);
             setError(null);
-            const response = await fetch(`/api/admin/document_chunks?document_title=${encodeURIComponent(documentTitle)}`);
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
+            
+            const response = await fetch(`/api/admin/document_chunks?document_title=${encodeURIComponent(documentTitle)}`, {
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
             if (!response.ok) {
                 throw new Error(`Failed to fetch document chunks: ${response.statusText}`);
             }
@@ -113,7 +136,11 @@ export const Admin: React.FC = () => {
             setDocumentChunks(chunks);
             setSelectedDocument(documentTitle);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to fetch document chunks');
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                setError('Request timed out while fetching document chunks');
+            } else {
+                setError(err instanceof Error ? err.message : 'Failed to fetch document chunks');
+            }
             setDocumentChunks([]); // Reset to empty array on error
         } finally {
             setChunksLoading(false);
