@@ -6,9 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "build:dev": "tsc -b && vite build --mode development",
+    "build:analyze": "tsc -b && vite build --mode analyze",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
     "preview": "vite preview",
-    "format": "prettier --write ./src"
+    "format": "prettier --write ./src",
+    "format:check": "prettier --check ./src",
+    "type-check": "tsc --noEmit",
+    "clean": "rimraf dist node_modules/.vite",
+    "test": "echo \"No tests specified\" && exit 0"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.1.0",

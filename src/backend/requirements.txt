@@ -16,3 +16,9 @@ azure-storage-blob == 12.24.0
 --extra-index-url https://pkgs.dev.azure.com/azure-sdk/public/_packaging/azure-sdk-for-python/pypi/simple/
 azure-search-documents==11.6.0a20250505003
 pyjwt
+
+# Production dependencies
+psutil>=5.9.0
+prometheus-client>=0.16.0
+structlog>=22.0.0
+tenacity>=8.2.0

@@ -4,6 +4,17 @@ import { defineConfig } from "vite";
 // https://vite.dev/config/
 export default defineConfig({
     plugins: [react()],
+    resolve: {
+        alias: {
+            "@": "/src",
+            "@/components": "/src/components",
+            "@/hooks": "/src/hooks",
+            "@/api": "/src/api",
+            "@/utils": "/src/utils",
+            "@/types": "/src/types",
+            "@/constants": "/src/constants"
+        }
+    },
     optimizeDeps: {
         esbuildOptions: {
             target: "esnext"
@@ -13,7 +24,16 @@ export default defineConfig({
         outDir: "../backend/static",
         emptyOutDir: true,
         sourcemap: true,
-        target: "esnext"
+        target: "esnext",
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    vendor: ["react", "react-dom"],
+                    fluent: ["@fluentui/react-components", "@fluentui/react-icons"],
+                    monaco: ["@monaco-editor/react"]
+                }
+            }
+        }
     },
     server: {
         proxy: {

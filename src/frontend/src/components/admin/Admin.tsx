@@ -107,11 +107,14 @@ export const Admin: React.FC = () => {
             if (!response.ok) {
                 throw new Error(`Failed to fetch document chunks: ${response.statusText}`);
             }
-            const chunks = await response.json();
+            const data = await response.json();
+            // Extract the chunks array from the response object
+            const chunks = Array.isArray(data) ? data : (data.chunks || []);
             setDocumentChunks(chunks);
             setSelectedDocument(documentTitle);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch document chunks');
+            setDocumentChunks([]); // Reset to empty array on error
         } finally {
             setChunksLoading(false);
         }
@@ -321,10 +324,10 @@ export const Admin: React.FC = () => {
                                                 ) : (
                                                     <div className="document-chunks">
                                                         <Text weight="semibold" size={400} style={{ marginBottom: '12px' }}>
-                                                            Document Chunks ({documentChunks.length})
+                                                            Document Chunks ({Array.isArray(documentChunks) ? documentChunks.length : 0})
                                                         </Text>
                                                         <div className="chunks-grid">
-                                                            {documentChunks.map((chunk, chunkIndex) => (
+                                                            {Array.isArray(documentChunks) && documentChunks.map((chunk, chunkIndex) => (
                                                                 <Card key={chunkIndex} className="chunk-card">
                                                                     <CardHeader>
                                                                         <div className="chunk-header">
@@ -420,6 +423,11 @@ export const Admin: React.FC = () => {
                                                                     </CardPreview>
                                                                 </Card>
                                                             ))}
+                                                            {(!Array.isArray(documentChunks) || documentChunks.length === 0) && (
+                                                                <div style={{ padding: '20px', textAlign: 'center' }}>
+                                                                    <Text>No chunks found for this document.</Text>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 )}

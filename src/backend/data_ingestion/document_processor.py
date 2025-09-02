@@ -107,17 +107,19 @@ async def main(source: str, indexer_Strategy: Optional[str] = None):
         user_agent_policy=UserAgentPolicy(base_user_agent=USER_AGENT),
     )
 
-    instructor_openai_client = instructor.from_openai(
-        AsyncAzureOpenAI(
-            azure_ad_token=(
-                await tokenCredential.get_token(
-                    "https://cognitiveservices.azure.com/.default"
-                )
-            ).token,
-            api_version="2024-08-01-preview",
-            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-        )
+    # Create regular OpenAI client for image descriptions
+    openai_client = AsyncAzureOpenAI(
+        azure_ad_token=(
+            await tokenCredential.get_token(
+                "https://cognitiveservices.azure.com/.default"
+            )
+        ).token,
+        api_version="2024-08-01-preview",
+        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
     )
+    
+    # Create instructor client for structured outputs (if needed elsewhere)
+    instructor_openai_client = instructor.from_openai(openai_client)
 
     blob_service_client = BlobServiceClient(
         account_url=os.environ["ARTIFACTS_STORAGE_ACCOUNT_URL"],
@@ -154,7 +156,7 @@ async def main(source: str, indexer_Strategy: Optional[str] = None):
             image_embedding_client,
             search_client,
             index_client,
-            instructor_openai_client,
+            openai_client,  # Use regular OpenAI client
             blob_service_client,
             os.environ["AZURE_OPENAI_DEPLOYMENT"],
         )
@@ -178,6 +180,7 @@ async def main(source: str, indexer_Strategy: Optional[str] = None):
     await search_client.close()
     await index_client.close()
     await indexer_Client.close()
+    await openai_client.close()
     await instructor_openai_client.close()
     await tokenCredential.close()
 

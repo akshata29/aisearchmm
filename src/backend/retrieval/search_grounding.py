@@ -1,4 +1,6 @@
 import logging
+import asyncio
+import sys
 from typing import List, Dict, TypedDict, Optional, Callable, Awaitable
 from openai import AsyncAzureOpenAI
 from core.data_model import DataModel
@@ -29,6 +31,8 @@ class SearchGroundingRetriever(GroundingRetriever):
         self._blob_service_client = blob_service_client
         self._container_client = container_client
         self._artifacts_container_client = artifacts_container_client
+        
+
 
     async def retrieve(
         self,
@@ -476,7 +480,7 @@ For hybrid search scenarios, focus on:
             logger.debug(f"Successfully fetched metadata for document {doc_id}, has_linked_image: {has_linked_image}")
             
         except Exception as e:
-            logger.warning(f"Could not fetch metadata for document {doc_id}: {e}")
+            logger.debug(f"Could not fetch metadata for document {doc_id}: {e}")
             
             # Try to extract metadata from the reference content itself
             try:
@@ -500,6 +504,21 @@ For hybrid search scenarios, focus on:
         
         return metadata
 
+    async def _get_document_with_retry(self, ref_id: str, max_retries: int = 2) -> Optional[dict]:
+        """Get document with simple retry logic."""
+        for attempt in range(max_retries + 1):
+            try:
+                return await self.search_client.get_document(ref_id)
+            except Exception as e:
+                if attempt < max_retries:
+                    await asyncio.sleep(0.1)
+                    continue
+                else:
+                    # Log at debug level to reduce noise
+                    logger.debug(f"Failed to fetch document {ref_id}: {e}")
+                    return None
+        return None
+
     async def _get_text_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults
     ) -> List[dict]:
@@ -508,7 +527,13 @@ For hybrid search scenarios, focus on:
             citations = []
             for ref_id in ref_ids:
                 try:
-                    document = await self.search_client.get_document(ref_id)
+                    document = await self._get_document_with_retry(ref_id)
+                    
+                    if document is None:
+                        # Document fetch failed, skip this citation
+                        logger.debug(f"Skipping citation for {ref_id} - document fetch failed")
+                        continue
+                        
                     citation = self.data_model.extract_citation(document)
                     
                     # Add enhanced metadata to citations

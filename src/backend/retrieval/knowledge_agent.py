@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import aiohttp
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Callable, Awaitable
@@ -60,26 +61,32 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         self.azure_openai_searchagent_deployment = azure_openai_searchagent_deployment
         self.azure_openai_searchagent_model = azure_openai_searchagent_model
 
-        self._create_retrieval_agent(
-            agent_name,
-            azure_openai_endpoint,
-            azure_openai_searchagent_deployment,
-            azure_openai_searchagent_model,
-        )
 
-    def _create_retrieval_agent(
+
+        # Note: Agent creation is deferred to first use to avoid event loop issues
+        self._agent_created = False
+
+    async def _ensure_retrieval_agent(
         self,
         agent_name,
         azure_openai_endpoint,
         azure_openai_searchagent_deployment,
         azure_openai_searchagent_model,
     ):
+        """Ensure retrieval agent is created - called on first use."""
+        if self._agent_created:
+            return
+            
         logger.info(f"Creating retrieval agent for {agent_name}")
         logger.info(f"OpenAI endpoint: {azure_openai_endpoint}")
         logger.info(f"Deployment name: {azure_openai_searchagent_deployment}")
         logger.info(f"Model name: {azure_openai_searchagent_model}")
         try:
-            asyncio.create_task(
+            # Use the current event loop to avoid context switching issues
+            loop = asyncio.get_running_loop()
+            
+            # Create the agent within the current event loop context
+            await asyncio.shield(
                 self.index_client.create_or_update_agent(
                     agent=AzureSearchKnowledgeAgent(
                         name=agent_name,
@@ -102,59 +109,16 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                                 )
                             )
                         ],
-                        # Set max output size for better performance (5K tokens as recommended)
-                        max_output_size=5000,
+                        # Note: max_output_size removed as it's not a valid parameter
                     )
                 )
             )
+            self._agent_created = True
+            logger.info(f"Successfully created/updated agent {agent_name}")
         except Exception as e:
             logger.error(f"Failed to create/update agent {agent_name}: {str(e)}")
-            raise
-
-    async def _create_retrieval_agent_async(
-        self,
-        agent_name,
-        azure_openai_endpoint,
-        azure_openai_searchagent_deployment,
-        azure_openai_searchagent_model,
-    ):
-        """Async version of agent creation for use during retrieval error handling."""
-        logger.info(f"Creating retrieval agent (async) for {agent_name}")
-        logger.info(f"OpenAI endpoint: {azure_openai_endpoint}")
-        logger.info(f"Deployment name: {azure_openai_searchagent_deployment}")
-        logger.info(f"Model name: {azure_openai_searchagent_model}")
-        
-        try:
-            await self.index_client.create_or_update_agent(
-                agent=AzureSearchKnowledgeAgent(
-                    name=agent_name,
-                    target_indexes=[
-                        KnowledgeAgentTargetIndex(
-                            index_name=self.index_name,
-                            default_include_reference_source_data=True,
-                            # Enhanced defaults for better quality
-                            default_reranker_threshold=2.0,  # Lower threshold for more results
-                            default_max_docs_for_reranker=100,  # Increase for better coverage
-                        )
-                    ],
-                    models=[
-                        KnowledgeAgentAzureOpenAIModel(
-                            azure_open_ai_parameters=AzureOpenAIVectorizerParameters(
-                                resource_url=azure_openai_endpoint,
-                                deployment_name=azure_openai_searchagent_deployment,
-                                api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
-                                model_name=azure_openai_searchagent_model,
-                            )
-                        )
-                    ],
-                    # Set max output size for better performance (5K tokens as recommended)
-                    max_output_size=5000,
-                )
-            )
-            logger.info(f"Successfully created/updated knowledge agent '{agent_name}'")
-        except Exception as e:
-            logger.error(f"Failed to create/update agent {agent_name}: {str(e)}")
-            raise
+            # Don't raise the exception - fall back to error handling
+            self._agent_created = False
 
     def _build_enhanced_filter(self, options: dict) -> Optional[str]:
         """Build OData filter based on prioritization strategy and user options."""
@@ -223,6 +187,15 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         3. Semantic + keyword search combination
         """
         try:
+            # Check if agent was created successfully during startup
+            if not self._agent_created:
+                logger.warning("Knowledge agent not created during startup, attempting creation now")
+                await self._ensure_retrieval_agent(
+                    self.agent_name,
+                    self.azure_openai_endpoint,
+                    self.azure_openai_searchagent_deployment,
+                    self.azure_openai_searchagent_model,
+                )
             if processing_step_callback:
                 # Combined setup and configuration message
                 setup_msg = "🔎 Knowledge Agent Setup & Configuration\n"
@@ -513,7 +486,7 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             logger.debug(f"Successfully fetched metadata for document {doc_id}, has_linked_image: {has_linked_image}")
             
         except Exception as e:
-            logger.warning(f"Could not fetch metadata for document {doc_id}: {e}")
+            logger.debug(f"Could not fetch metadata for document {doc_id}: {e}")
             
             # Try to extract metadata from the reference content itself
             try:
@@ -642,6 +615,21 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             
         return references
 
+    async def _get_document_with_retry(self, ref_id: str, max_retries: int = 2) -> Optional[dict]:
+        """Get document with simple retry logic."""
+        for attempt in range(max_retries + 1):
+            try:
+                return await self.search_client.get_document(ref_id)
+            except Exception as e:
+                if attempt < max_retries:
+                    await asyncio.sleep(0.1)
+                    continue
+                else:
+                    # Log at debug level to reduce noise
+                    logger.debug(f"Failed to fetch document {ref_id}: {e}")
+                    return None
+        return None
+
     async def _get_text_citations(
         self, ref_ids: List[str], grounding_results: GroundingResults
     ) -> List[dict]:
@@ -650,7 +638,14 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             citations = []
             for ref_id in ref_ids:
                 try:
-                    document = await self.search_client.get_document(ref_id)
+                    document = await self._get_document_with_retry(ref_id)
+                    
+                    if document is None:
+                        # Document fetch failed, skip this citation
+                        logger.debug(f"Skipping citation for {ref_id} - document fetch failed")
+                        continue
+                        
+                    citation = self.data_model.extract_citation(document)
                     citation = self.data_model.extract_citation(document)
                     
                     # Add enhanced metadata to citations

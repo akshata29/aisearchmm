@@ -15,6 +15,7 @@ from azure.ai.inference.aio import EmbeddingsClient, ImageEmbeddingsClient
 from azure.ai.inference.models import ImageEmbeddingInput
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from instructor import AsyncInstructor
+from openai import AsyncAzureOpenAI
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.indexes.aio import SearchIndexClient
 from azure.search.documents.indexes.models import (
@@ -58,7 +59,7 @@ class ProcessFile:
         image_model: ImageEmbeddingsClient,
         search_client: SearchClient,
         index_client: SearchIndexClient,
-        instructor_openai_client: AsyncInstructor,
+        instructor_openai_client: AsyncAzureOpenAI,  # This is actually a regular OpenAI client now
         blob_service_client: BlobServiceClient,
         chatcompletions_model_name: str,
         progress_callback=None,
@@ -202,6 +203,7 @@ class ProcessFile:
                     VectorSearchProfile(
                         name="hnsw",
                         algorithm_configuration_name="hnsw-config",
+                        vectorizer_name="openai-vectorizer"
                     )
                 ],
             )
@@ -805,7 +807,7 @@ Make your description detailed but concise, focusing on information that would b
 
 Provide only the description without any preamble or explanation."""
 
-            # Use the instructor client to get image description
+            # Use the OpenAI client directly for image description (not instructor)
             response = await self.instructor_openai_client.chat.completions.create(
                 model=self.chatcompletions_model_name,
                 messages=[
@@ -1262,7 +1264,7 @@ Provide only the description without any preamble or explanation."""
 
         vector_search = VectorSearch(
             profiles=[
-                VectorSearchProfile(name="hnsw", algorithm_configuration_name="hnsw-config")
+                VectorSearchProfile(name="hnsw", algorithm_configuration_name="hnsw-config", vectorizer_name="openai-vectorizer")
             ],
             algorithms=[
                 HnswAlgorithmConfiguration(

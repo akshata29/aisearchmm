@@ -3,7 +3,10 @@ import tempfile
 import asyncio
 import aiofiles
 import datetime
-from typing import Optional
+import logging
+import time
+import hashlib
+from typing import Optional, Dict, Any
 from pathlib import Path
 from aiohttp import web
 import json
@@ -13,6 +16,7 @@ from azure.core.pipeline.policies import UserAgentPolicy
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
 from azure.ai.inference.aio import EmbeddingsClient, ImageEmbeddingsClient
 from azure.core.credentials import AzureKeyCredential
+from azure.core.exceptions import AzureError
 from openai import AsyncAzureOpenAI
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.indexes.aio import SearchIndexClient, SearchIndexerClient
@@ -23,30 +27,80 @@ import instructor
 from constants import USER_AGENT
 from data_ingestion.process_file import ProcessFile
 
+# Set up structured logging
+logger = logging.getLogger(__name__)
+
 
 class SimpleDocumentUploadHandler:
+    """Production-ready document upload handler with enhanced error handling and monitoring."""
+    
+    # Configuration constants
+    SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.doc', '.txt', '.md', '.html', '.htm'}
+    MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+    
     def __init__(self):
         self.credential = None
         self.clients = {}
         self.processing_status = {}  # Simple in-memory status tracking
+        self.active_uploads = 0
+        
+        logger.info("Upload handler initialized", extra={
+            "max_file_size_mb": self.MAX_FILE_SIZE / (1024 * 1024),
+            "supported_extensions": list(self.SUPPORTED_EXTENSIONS)
+        })
+
+    def _validate_file(self, filename: str, file_size: int) -> None:
+        """Validate uploaded file for security and format compliance."""
+        if not filename:
+            raise ValueError("Filename is required")
+            
+        # Check file extension
+        file_ext = Path(filename).suffix.lower()
+        if file_ext not in self.SUPPORTED_EXTENSIONS:
+            raise ValueError(
+                f"Unsupported file type: {file_ext}. "
+                f"Supported types: {', '.join(self.SUPPORTED_EXTENSIONS)}"
+            )
+            
+        # Check file size
+        if file_size > self.MAX_FILE_SIZE:
+            raise ValueError(
+                f"File too large: {file_size / (1024*1024):.1f}MB. "
+                f"Maximum allowed: {self.MAX_FILE_SIZE / (1024*1024):.1f}MB"
+            )
+            
+        # Check filename for security (basic sanitization)
+        if any(char in filename for char in ['..', '/', '\\', '<', '>', ':', '"', '|', '?', '*']):
+            raise ValueError("Filename contains invalid characters")
 
     async def initialize_clients(self):
         """Initialize all Azure clients needed for document processing"""
+        logger.info("Initializing Azure clients")
+        start_time = time.time()
+        
         if self.credential is None:
             self.credential = DefaultAzureCredential()
 
         # Initialize Document Intelligence client with key
         document_key = os.environ.get("DOCUMENTINTELLIGENCE_KEY")
+        doc_endpoint = os.environ.get("DOCUMENTINTELLIGENCE_ENDPOINT")
+        
+        if not doc_endpoint:
+            logger.error("DOCUMENTINTELLIGENCE_ENDPOINT environment variable is required")
+            raise ValueError("DOCUMENTINTELLIGENCE_ENDPOINT environment variable is required")
+            
         if document_key:
             self.clients['document'] = DocumentIntelligenceClient(
-                endpoint=os.environ["DOCUMENTINTELLIGENCE_ENDPOINT"],
+                endpoint=doc_endpoint,
                 credential=AzureKeyCredential(document_key),
             )
+            logger.info("Document Intelligence client initialized with API key")
         else:
             self.clients['document'] = DocumentIntelligenceClient(
-                endpoint=os.environ["DOCUMENTINTELLIGENCE_ENDPOINT"],
+                endpoint=doc_endpoint,
                 credential=self.credential,
             )
+            logger.info("Document Intelligence client initialized with managed identity")
 
         # Initialize embedding clients - use Azure OpenAI instead of Azure AI Inference
         # since AI Inference endpoint may not have embedding models available
@@ -123,7 +177,9 @@ class SimpleDocumentUploadHandler:
             api_key=os.environ["AZURE_OPENAI_API_KEY"],
             api_version="2024-08-01-preview",
         )
-        self.clients['openai'] = instructor.from_openai(openai_client)
+        # Store both regular and instructor clients
+        self.clients['openai'] = openai_client
+        self.clients['instructor_openai'] = instructor.from_openai(openai_client)
 
         # Initialize Search clients with API key
         search_key = os.environ.get("SEARCH_API_KEY")
@@ -159,18 +215,43 @@ class SimpleDocumentUploadHandler:
         self.clients['blob_container'] = self.clients['blob_service'].get_container_client(
             os.environ["ARTIFACTS_STORAGE_CONTAINER"]
         )
+        
+        duration = time.time() - start_time
+        logger.info("All Azure clients initialized successfully", extra={
+            "initialization_time_seconds": round(duration, 3),
+            "clients_count": len(self.clients)
+        })
 
     async def handle_upload(self, request):
-        """Handle file upload"""
+        """Handle file upload with enhanced validation and monitoring"""
+        upload_id = str(uuid.uuid4())
+        operation_start = time.time()
+        
         try:
-            # Generate unique upload ID
-            upload_id = str(uuid.uuid4())
+            logger.info("Starting file upload", extra={
+                "upload_id": upload_id,
+                "remote_addr": request.remote
+            })
             
-            # Update status
+            # Check concurrent uploads limit
+            if self.active_uploads >= 10:  # Reasonable limit
+                logger.warning("Upload rejected due to rate limit", extra={
+                    "upload_id": upload_id,
+                    "active_uploads": self.active_uploads
+                })
+                return web.json_response({
+                    "error": "Too many concurrent uploads. Please try again later."
+                }, status=429)
+            
+            self.active_uploads += 1
+            
+            # Initialize status
             self.processing_status[upload_id] = {
                 "status": "uploading",
                 "message": "Receiving file...",
-                "progress": 10
+                "progress": 10,
+                "created_at": datetime.datetime.now().isoformat(),
+                "upload_id": upload_id
             }
 
             # Get the uploaded file
@@ -178,18 +259,31 @@ class SimpleDocumentUploadHandler:
             field = await reader.next()
             
             if field.name != 'file':
-                return web.json_response(
-                    {"error": "No file field found"}, 
-                    status=400
-                )
+                logger.warning("No file field found in upload", extra={"upload_id": upload_id})
+                return web.json_response({
+                    "error": "No file field found"
+                }, status=400)
 
-            # Save file temporarily
+            # Get filename and validate
             filename = field.filename or "upload.pdf"
-            if not filename.lower().endswith('.pdf'):
-                return web.json_response(
-                    {"error": "Only PDF files are supported"}, 
-                    status=400
-                )
+            
+            # Get file size if available
+            file_size = 0
+            if hasattr(field, 'size') and field.size:
+                file_size = field.size
+                
+            try:
+                # Validate file before processing
+                self._validate_file(filename, file_size)
+            except ValueError as e:
+                logger.warning("File validation failed", extra={
+                    "upload_id": upload_id,
+                    "file_name": filename,
+                    "error": str(e)
+                })
+                return web.json_response({
+                    "error": str(e)
+                }, status=400)
 
             # Create temp file
             temp_dir = tempfile.mkdtemp()
@@ -214,20 +308,48 @@ class SimpleDocumentUploadHandler:
             self.processing_status[upload_id]["file_path"] = str(temp_file_path)
             self.processing_status[upload_id]["filename"] = filename
 
+            duration = time.time() - operation_start
+            logger.info("File upload completed successfully", extra={
+                "upload_id": upload_id,
+                "file_name": filename,
+                "file_size_bytes": temp_file_path.stat().st_size if temp_file_path.exists() else 0,
+                "duration_seconds": round(duration, 3)
+            })
+
             return web.json_response({
                 "upload_id": upload_id,
                 "filename": filename,
                 "message": "File uploaded successfully"
             })
 
+        except AzureError as e:
+            logger.error("Azure service error during upload", extra={
+                "upload_id": upload_id,
+                "error_type": "AzureError",
+                "error_message": str(e)
+            }, exc_info=True)
+            return web.json_response({
+                "error": "Azure service error during upload"
+            }, status=500)
         except Exception as e:
-            return web.json_response(
-                {"error": f"Upload failed: {str(e)}"}, 
-                status=500
-            )
+            logger.error("Unexpected error during upload", extra={
+                "upload_id": upload_id,
+                "error_type": type(e).__name__,
+                "error_message": str(e)
+            }, exc_info=True)
+            return web.json_response({
+                "error": f"Upload failed: {str(e)}"
+            }, status=500)
+        finally:
+            # Always decrement active uploads counter
+            if hasattr(self, 'active_uploads'):
+                self.active_uploads = max(0, self.active_uploads - 1)
 
     async def handle_process_document(self, request):
-        """Handle document processing"""
+        """Handle document processing with enhanced logging and monitoring"""
+        process_start = time.time()
+        upload_id = None
+        
         try:
             data = await request.json()
             upload_id = data.get('upload_id')
@@ -240,11 +362,23 @@ class SimpleDocumentUploadHandler:
             output_format = data.get('output_format', 'markdown')  # 'markdown' or 'text'
             chunking_strategy = data.get('chunking_strategy', 'document_layout')  # 'document_layout' or 'custom'
             
+            logger.info("Starting document processing", extra={
+                "upload_id": upload_id,
+                "chunk_size": chunk_size,
+                "chunk_overlap": chunk_overlap,
+                "output_format": output_format,
+                "chunking_strategy": chunking_strategy,
+                "document_type": document_type
+            })
+            
             if not upload_id or upload_id not in self.processing_status:
-                return web.json_response(
-                    {"error": "Invalid upload ID"}, 
-                    status=400
-                )
+                logger.warning("Invalid or missing upload ID", extra={
+                    "upload_id": upload_id,
+                    "available_uploads": list(self.processing_status.keys())
+                })
+                return web.json_response({
+                    "error": "Invalid upload ID"
+                }, status=400)
 
             # Initialize clients if not done
             if not self.clients:
@@ -278,8 +412,15 @@ class SimpleDocumentUploadHandler:
             self.processing_status[upload_id]["message"] = "Processing document..."
             self.processing_status[upload_id]["progress"] = 60
 
-            # Start processing in background
-            asyncio.create_task(self._process_document_async(upload_id, file_path, filename))
+            # Start processing in background with proper task management
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(self._process_document_async(upload_id, file_path, filename))
+            
+            # Store the task to prevent it from being garbage collected
+            if not hasattr(self, '_background_tasks'):
+                self._background_tasks = set()
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
             return web.json_response({
                 "upload_id": upload_id,
@@ -344,7 +485,7 @@ class SimpleDocumentUploadHandler:
                 image_model=self.clients['image_embedding'],
                 search_client=self.clients['search'],
                 index_client=self.clients['search_index'],
-                instructor_openai_client=self.clients['openai'],
+                instructor_openai_client=self.clients['openai'],  # Use regular OpenAI client for image descriptions
                 blob_service_client=self.clients['blob_service'],
                 chatcompletions_model_name=os.environ["AZURE_OPENAI_DEPLOYMENT"],
                 progress_callback=progress_cb,
