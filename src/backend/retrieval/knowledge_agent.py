@@ -124,12 +124,16 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         """Build OData filter based on prioritization strategy and user options."""
         filters = []
         
-        # Priority 1: Recent documents filter (boost recent published dates)
-        recency_days = options.get("recency_preference_days", 365)  # Default to 1 year
+        # Priority 1: Recent documents filter - NOW IMPLEMENTED AS HARD FILTER
+        # Since Knowledge Agent doesn't support scoring profiles, we use hard filtering
+        # for recency preference instead of relying on the (unused) scoring profile
+        recency_days = options.get("recency_preference_days", 90)  # Default to 1 year
         if recency_days > 0:
             cutoff_date = datetime.utcnow() - timedelta(days=recency_days)
-            # Note: We don't add this as a hard filter, but use it for boosting in scoring profiles
-            logger.info(f"Prioritizing documents published after {cutoff_date.isoformat()}")
+            cutoff_date_str = cutoff_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+            recency_filter = f"published_date ge {cutoff_date_str}"
+            filters.append(recency_filter)
+            logger.info(f"Applied hard recency filter: documents published after {cutoff_date.isoformat()}")
         
         # Priority 2: Document type preferences
         preferred_doc_types = options.get("preferred_document_types", [])
@@ -564,7 +568,12 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         references: List[GroundingResult], 
         options: dict
     ) -> List[GroundingResult]:
-        """Apply additional prioritization logic after retrieval."""
+        """Apply additional prioritization logic after retrieval.
+        
+        NOTE: This is a workaround because Knowledge Agent API doesn't support 
+        scoring profiles (even though the index has freshness_and_type_boost configured).
+        We do minimal post-processing since hard filtering handles recency preference.
+        """
         if not options.get("enable_post_processing_boost", True):
             return references
             
@@ -573,21 +582,22 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             score = 0.0
             metadata = ref.get("metadata", {})
             
-            # Factor 1: Recency boost (highest priority)
+            # Factor 1: Fine-grained recency boost within the filtered timeframe
+            # (Hard filter already removed old documents, this provides ranking within results)
             published_date = metadata.get("published_date")
             if published_date:
                 try:
                     pub_date = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
                     days_old = (datetime.now(pub_date.tzinfo) - pub_date).days
                     
-                    # Exponential decay for recency (newer = higher score)
-                    if days_old <= 30:
-                        score += 3.0  # Very recent
+                    # Fine-grained recency boost within filtered results
+                    if days_old <= 7:
+                        score += 1.0  # Very recent
+                    elif days_old <= 30:
+                        score += 0.7  # Recent
                     elif days_old <= 90:
-                        score += 2.0  # Recent
-                    elif days_old <= 365:
-                        score += 1.0  # Moderately recent
-                    # Older documents get no recency boost
+                        score += 0.4  # Moderately recent
+                    # Older documents (but still within recency filter) get minimal boost
                         
                 except (ValueError, TypeError):
                     pass  # Invalid date format
@@ -991,7 +1001,7 @@ class KnowledgeAgentGrounding(GroundingRetriever):
             ],
             "recommended_options": {
                 "chunk_count": 10,  # Number of final results to return
-                "recency_preference_days": 365,
+                "recency_preference_days": 90,  # Default to 90 days for better recency filtering
                 "query_complexity": "medium",
                 "preferred_document_types": ["research_paper", "technical_document", "report"],
                 "enable_post_processing_boost": True,

@@ -12,7 +12,7 @@ export default function useConfig() {
         use_knowledge_agent: true,
         
         // Enhanced Knowledge Agent options with defaults
-        recency_preference_days: 365,
+        recency_preference_days: 90,
         query_complexity: "medium",
         preferred_document_types: [],
         enable_post_processing_boost: true,
@@ -21,7 +21,7 @@ export default function useConfig() {
         // Hybrid Search Configuration defaults (when not using Knowledge Agent)
         use_hybrid_search: false,
         use_query_rewriting: false,
-        use_scoring_profile: false,
+        use_scoring_profile: true,  // Enable scoring profile by default for freshness boosting
         scoring_profile_name: "freshness_and_type_boost",
         vector_weight: 0.5,
         rrf_k_parameter: 60,

@@ -17,6 +17,8 @@ azure-storage-blob == 12.24.0
 azure-search-documents==11.6.0a20250505003
 pyjwt
 
+watchdog
+
 # Production dependencies
 psutil>=5.9.0
 prometheus-client>=0.16.0

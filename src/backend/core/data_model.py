@@ -69,6 +69,27 @@ class DocumentPerChunkDataModel(DataModel):
             # Use the semantic configuration name that matches the index setup
             payload["semantic_configuration_name"] = "semantic-config"
 
+        # Add recency filter if specified (similar to Knowledge Agent)
+        recency_days = search_config.get("recency_preference_days")
+        filters = []
+        
+        if recency_days and recency_days < 1095:  # Only filter if less than 3 years (1095 days)
+            from datetime import datetime, timedelta
+            cutoff_date = datetime.utcnow() - timedelta(days=recency_days)
+            cutoff_date_str = cutoff_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            recency_filter = f"published_date ge {cutoff_date_str}"
+            filters.append(recency_filter)
+        
+        # Add any additional filters
+        additional_filters = search_config.get("additional_filters", [])
+        if additional_filters:
+            filters.extend(additional_filters)
+            
+        if filters:
+            # Combine multiple filters with 'and'
+            filter_string = " and ".join(filters)
+            payload["filter"] = filter_string
+
         return payload
 
     def _create_advanced_search_payload(
@@ -154,11 +175,25 @@ class DocumentPerChunkDataModel(DataModel):
         #     payload["query_rewrites"] = f"generative|count-{query_rewrite_count}"
         #     payload["query_language"] = "en-US"  # Default to English, could be configurable
 
+        # Add recency filter if specified (similar to Knowledge Agent)
+        recency_days = search_config.get("recency_preference_days")
+        filters = []
+        
+        if recency_days and recency_days < 1095:  # Only filter if less than 3 years (1095 days)
+            from datetime import datetime, timedelta
+            cutoff_date = datetime.utcnow() - timedelta(days=recency_days)
+            cutoff_date_str = cutoff_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            recency_filter = f"published_date ge {cutoff_date_str}"
+            filters.append(recency_filter)
+        
         # Add any additional filters
         additional_filters = search_config.get("additional_filters", [])
         if additional_filters:
+            filters.extend(additional_filters)
+            
+        if filters:
             # Combine multiple filters with 'and'
-            filter_string = " and ".join(additional_filters)
+            filter_string = " and ".join(filters)
             payload["filter"] = filter_string
 
         return payload
@@ -198,6 +233,14 @@ class DocumentPerChunkDataModel(DataModel):
         if search_config.get("enable_vector_filters", False):
             if not search_config.get("use_hybrid_search", False):
                 warnings.append("Vector filters are only useful with hybrid search enabled")
+        
+        # Check recency preference configuration
+        recency_days = search_config.get("recency_preference_days")
+        if recency_days:
+            if recency_days < 30:
+                warnings.append("Very short recency preference may exclude relevant content")
+            elif recency_days < 1095:  # Less than 3 years
+                warnings.append(f"Recency filter active: only documents from last {recency_days} days will be included")
                 
         return warnings
 

@@ -171,6 +171,25 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
                 label={<InfoLabel label={"Use Knowledge Agent"} info={<>Enable knowledge agent for grounding answers</>} />}
             />
 
+            {/* Recency preference slider - available for all search types */}
+            <div className="input-group">
+                <Label htmlFor="RecencySlider">Recency preference (days) [{config.recency_preference_days || 90}]</Label>
+                <Slider
+                    id="recencySlider"
+                    className="weightSlider"
+                    value={config.recency_preference_days || 90}
+                    onChange={(_: React.ChangeEvent<HTMLInputElement>, data: SliderOnChangeData) => handleSliderChange("recency_preference_days", data.value)}
+                    min={0}
+                    max={1095}
+                    step={30}
+                />
+                <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
+                    {config.use_knowledge_agent 
+                        ? "Boost documents published within this timeframe" 
+                        : "Filter and boost documents published within this timeframe"}
+                </Text>
+            </div>
+
             {/* Knowledge Agent specific settings */}
             {config.use_knowledge_agent && (
                 <>
@@ -178,22 +197,6 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
                     <Text size={300} weight="semibold" style={{ display: "block", marginBottom: "12px", color: "var(--colorNeutralForeground2)" }}>
                         Knowledge Agent Options
                     </Text>
-
-                    <div className="input-group">
-                        <Label htmlFor="RecencySlider">Recency preference (days) [{config.recency_preference_days || 365}]</Label>
-                        <Slider
-                            id="recencySlider"
-                            className="weightSlider"
-                            value={config.recency_preference_days || 365}
-                            onChange={(_: React.ChangeEvent<HTMLInputElement>, data: SliderOnChangeData) => handleSliderChange("recency_preference_days", data.value)}
-                            min={30}
-                            max={1095}
-                            step={30}
-                        />
-                        <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
-                            Boost documents published within this timeframe
-                        </Text>
-                    </div>
 
                     <div className="input-group">
                         <Label htmlFor="QueryComplexityDropdown">Query complexity</Label>
