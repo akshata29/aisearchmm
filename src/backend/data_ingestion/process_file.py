@@ -3,6 +3,8 @@ import datetime
 import os
 import json
 import uuid
+import PyPDF2
+import io
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import (
     AnalyzeResult,
@@ -85,7 +87,7 @@ class ProcessFile:
             os.environ["SAMPLES_STORAGE_CONTAINER"]
         )
 
-    def _prepare_metadata(self, published_date: str = None, document_type: str = None):
+    def _prepare_metadata(self, published_date: str = None, document_type: str = None, expiry_date: str = None):
         """Prepare metadata for document indexing with validation and defaults."""
         metadata = {}
         
@@ -98,34 +100,166 @@ class ProcessFile:
                 else:
                     # Try parsing as date only (YYYY-MM-DD)
                     parsed_date = datetime.datetime.strptime(published_date, '%Y-%m-%d')
-                metadata["published_date"] = parsed_date.isoformat() + 'Z'
+                
+                # Ensure we have timezone info and format correctly for Azure Search
+                if parsed_date.tzinfo is None:
+                    # If no timezone, assume UTC
+                    parsed_date = parsed_date.replace(tzinfo=datetime.timezone.utc)
+                
+                # Format as ISO string with 'Z' suffix for UTC (Azure Search format)
+                metadata["published_date"] = parsed_date.astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
             except (ValueError, TypeError) as e:
                 print(f"Warning: Invalid published_date format '{published_date}', using current date. Error: {e}")
-                metadata["published_date"] = datetime.datetime.utcnow().isoformat() + 'Z'
+                metadata["published_date"] = datetime.datetime.utcnow().isoformat().replace('+00:00', 'Z')
         else:
             # Default to current date if not provided
-            metadata["published_date"] = datetime.datetime.utcnow().isoformat() + 'Z'
-        
+            metadata["published_date"] = datetime.datetime.utcnow().isoformat().replace('+00:00', 'Z')
+            
+        # Handle expiry_date
+        if expiry_date:
+            try:
+                # Try to parse as ISO format first
+                if 'T' in expiry_date:
+                    parsed_date = datetime.datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+                else:
+                    # Try parsing as date only (YYYY-MM-DD)
+                    parsed_date = datetime.datetime.strptime(expiry_date, '%Y-%m-%d')
+                
+                # Ensure we have timezone info and format correctly for Azure Search
+                if parsed_date.tzinfo is None:
+                    # If no timezone, assume UTC
+                    parsed_date = parsed_date.replace(tzinfo=datetime.timezone.utc)
+                
+                # Format as ISO string with 'Z' suffix for UTC (Azure Search format)
+                metadata["expiry_date"] = parsed_date.astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+            except (ValueError, TypeError) as e:
+                print(f"Warning: Invalid expiry_date format '{expiry_date}', skipping expiry date. Error: {e}")
+                metadata["expiry_date"] = None
+        else:
+            # No default for expiry_date - it's optional
+            metadata["expiry_date"] = None
+
         # Handle document_type with validation
         if document_type:
-            # Normalize and validate document type
-            valid_types = {
+            # Normalize document type but accept any value since we're extracting from PDFs
+            normalized_type = document_type.lower().strip()
+            
+            # Known valid types for reference (but we accept others too)
+            known_types = {
                 "quarterly_report", "newsletter", "articles", "annual_report", 
                 "financial_statement", "presentation", "whitepaper", "research_report", 
                 "policy_document", "manual", "guide", "client_reviews", "nyp_columns", 
                 "otq", "other"
             }
-            normalized_type = document_type.lower().strip()
-            if normalized_type in valid_types:
-                metadata["document_type"] = normalized_type
-            else:
-                print(f"Warning: Unknown document_type '{document_type}', using 'other'")
-                metadata["document_type"] = "other"
+            
+            # Use the extracted/provided type as-is, but log if it's unknown
+            metadata["document_type"] = normalized_type
+            if normalized_type not in known_types:
+                print(f"Info: Using extracted document_type '{normalized_type}' (not in predefined list)")
         else:
             # Default to 'other' if not provided
             print("Warning: document_type not provided, using 'other'")
             metadata["document_type"] = "other"
+
+        return metadata
+
+    def _extract_pdf_metadata(self, file_bytes: bytes) -> dict:
+        """Extract metadata properties from PDF document."""
+        metadata = {
+            "published_date": None,
+            "document_type": None,
+            "expiry_date": None
+        }
+        
+        try:
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
             
+            if pdf_reader.metadata:
+                pdf_metadata = pdf_reader.metadata
+                
+                # Check for custom properties - these are the standard names from the attachments
+                custom_props = {}
+                
+                # Extract custom properties (these might be in different formats)
+                for key, value in pdf_metadata.items():
+                    if isinstance(key, str):
+                        # Convert PDF metadata keys to lowercase for comparison
+                        lower_key = key.lower().replace('/', '').replace('_', '').replace(' ', '')
+                        
+                        # Map common metadata fields
+                        if 'publishdate' in lower_key or 'published' in lower_key:
+                            custom_props['published_date'] = value
+                        elif 'expirydate' in lower_key or 'expiry' in lower_key or 'expires' in lower_key:
+                            custom_props['expiry_date'] = value
+                        elif 'documenttype' in lower_key or 'doctype' in lower_key or 'type' in lower_key:
+                            custom_props['document_type'] = value
+                        elif 'publisheddate' in lower_key:
+                            custom_props['published_date'] = value
+                
+                # Also check for standard PDF metadata fields
+                if '/CreationDate' in pdf_metadata and not custom_props.get('published_date'):
+                    creation_date = pdf_metadata['/CreationDate']
+                    if creation_date:
+                        custom_props['published_date'] = str(creation_date)
+                
+                # Process extracted properties
+                for prop_name, prop_value in custom_props.items():
+                    if prop_value and str(prop_value).strip():
+                        value_str = str(prop_value).strip()
+                        
+                        if prop_name in ['published_date', 'expiry_date']:
+                            # Try to parse date values
+                            try:
+                                # Handle various date formats
+                                if 'D:' in value_str:  # PDF date format
+                                    # Remove PDF date format prefix and parse
+                                    clean_date = value_str.replace('D:', '').split('+')[0].split('-')[0]
+                                    if len(clean_date) >= 8:
+                                        parsed_date = datetime.datetime.strptime(clean_date[:8], '%Y%m%d')
+                                        metadata[prop_name] = parsed_date.strftime('%Y-%m-%d')
+                                elif '/' in value_str:  # MM/DD/YYYY or DD/MM/YYYY
+                                    parts = value_str.split('/')
+                                    if len(parts) == 3:
+                                        # Assume MM/DD/YYYY format
+                                        try:
+                                            parsed_date = datetime.datetime.strptime(value_str, '%m/%d/%Y')
+                                            metadata[prop_name] = parsed_date.strftime('%Y-%m-%d')
+                                        except ValueError:
+                                            # Try DD/MM/YYYY format
+                                            parsed_date = datetime.datetime.strptime(value_str, '%d/%m/%Y')
+                                            metadata[prop_name] = parsed_date.strftime('%Y-%m-%d')
+                                elif '-' in value_str:  # YYYY-MM-DD or similar
+                                    if len(value_str.split('-')) == 3:
+                                        parsed_date = datetime.datetime.strptime(value_str, '%Y-%m-%d')
+                                        metadata[prop_name] = parsed_date.strftime('%Y-%m-%d')
+                                else:
+                                    # Try to parse as simple date string
+                                    metadata[prop_name] = value_str
+                            except Exception as e:
+                                print(f"Warning: Could not parse {prop_name} date '{value_str}': {e}")
+                                metadata[prop_name] = value_str
+                        elif prop_name == 'document_type':
+                            # Map document type values
+                            type_mapping = {
+                                'nvp': 'nyp_columns',
+                                'nvp_columns': 'nyp_columns',
+                                'nyp_columns': 'nyp_columns',
+                                'nl': 'newsletter',
+                                'newsletter': 'newsletter',
+                                'otq': 'otq',
+                                'only_three_questions': 'otq',
+                                'client_reviews': 'client_reviews',
+                                'review': 'client_reviews'
+                            }
+                            
+                            normalized_type = value_str.lower().strip()
+                            metadata[prop_name] = type_mapping.get(normalized_type, normalized_type)
+                
+                print(f"Extracted PDF metadata: {metadata}")
+                
+        except Exception as e:
+            print(f"Warning: Could not extract PDF metadata: {e}")
+        
         return metadata
 
     async def process_file(
@@ -135,13 +269,31 @@ class ProcessFile:
         index_name: str,
         published_date: str = None,
         document_type: str = None,
+        expiry_date: str = None,
         chunk_size: int = 500,
         chunk_overlap: int = 50,
         output_format: str = "markdown",  # "markdown" or "text"
         chunking_strategy: str = "document_layout",  # "document_layout" or "custom"
     ):
+        # Try to extract metadata from PDF first, then use provided values as override
+        if file_name.lower().endswith('.pdf'):
+            pdf_metadata = self._extract_pdf_metadata(file_bytes)
+            
+            # Use extracted metadata as defaults if no values provided
+            if not published_date and pdf_metadata.get("published_date"):
+                published_date = pdf_metadata["published_date"]
+                print(f"Using extracted published_date: {published_date}")
+                
+            if not document_type and pdf_metadata.get("document_type"):
+                document_type = pdf_metadata["document_type"]
+                print(f"Using extracted document_type: {document_type}")
+                
+            if not expiry_date and pdf_metadata.get("expiry_date"):
+                expiry_date = pdf_metadata["expiry_date"]
+                print(f"Using extracted expiry_date: {expiry_date}")
+        
         # Prepare and validate metadata
-        document_metadata = self._prepare_metadata(published_date, document_type)
+        document_metadata = self._prepare_metadata(published_date, document_type, expiry_date)
         print(f"Processing file '{file_name}' with metadata: {document_metadata}")
         print(f"Chunking strategy: {chunking_strategy}")
         if chunking_strategy == "custom":
@@ -173,6 +325,7 @@ class ProcessFile:
                 SimpleField(name="related_image_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
                 # New metadata fields
                 SimpleField(name="published_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
+                SimpleField(name="expiry_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
                 SearchableField(name="document_type", type=SearchFieldDataType.String, searchable=True, filterable=True, sortable=True, facetable=True),
                 ComplexField(name="locationMetadata", fields=[
                     SimpleField(name="pageNumber", type=SearchFieldDataType.Int32, searchable=False, filterable=True, hidden=False, sortable=True, facetable=True),
@@ -285,15 +438,15 @@ class ProcessFile:
             print(f"Error creating index: {e}")
         ext = file_name.split(".")[-1].lower()
         if ext == "pdf":
-            await self._process_pdf(file_bytes, file_name, index_name, published_date, document_type, chunk_size, chunk_overlap, output_format, chunking_strategy)
+            await self._process_pdf(file_bytes, file_name, index_name, document_metadata.get("published_date"), document_metadata.get("document_type"), document_metadata.get("expiry_date"), chunk_size, chunk_overlap, output_format, chunking_strategy)
         else:
             print(f"Unsupported file type: {file_name}")
 
-    async def _process_pdf(self, file_bytes: bytes, file_name: str, index_name: str, published_date: str = None, document_type: str = None, chunk_size: int = 500, chunk_overlap: int = 50, output_format: str = "markdown", chunking_strategy: str = "document_layout"):
+    async def _process_pdf(self, file_bytes: bytes, file_name: str, index_name: str, published_date: str = None, document_type: str = None, expiry_date: str = None, chunk_size: int = 500, chunk_overlap: int = 50, output_format: str = "markdown", chunking_strategy: str = "document_layout"):
         """Processes PDF documents for text, layout, and image embeddings."""
         
         # Prepare and validate metadata for this document
-        document_metadata = self._prepare_metadata(published_date, document_type)
+        document_metadata = self._prepare_metadata(published_date, document_type, expiry_date)
         print(f"Processing PDF '{file_name}' with metadata: {document_metadata}")
 
         await self.sample_container_client.upload_blob(file_name, file_bytes, overwrite=True)
@@ -395,6 +548,7 @@ class ProcessFile:
                     "source_figure_id": img.get("figure_id"),  # Link back to source figure
                     "related_image_path": blob_name,  # Self-reference for image content
                     "published_date": document_metadata["published_date"],
+                    "expiry_date": document_metadata["expiry_date"],
                     "document_type": document_metadata["document_type"],
                     "locationMetadata": {
                         "pageNumber": img["page_number"],
@@ -556,6 +710,7 @@ class ProcessFile:
                     "source_figure_id": figure_info.get("figure_id") if figure_info else None,
                     "related_image_path": figure_info.get("blob_name") if figure_info else None,
                     "published_date": document_metadata["published_date"],
+                    "expiry_date": document_metadata["expiry_date"],
                     "document_type": document_metadata["document_type"],
                     "locationMetadata": {
                         "pageNumber": chunk["page_number"],
@@ -619,6 +774,7 @@ class ProcessFile:
                         "source_figure_id": None,  # Not linking figures in custom chunking
                         "related_image_path": None,
                         "published_date": document_metadata.get("published_date"),
+                        "expiry_date": document_metadata.get("expiry_date"),
                         "document_type": document_metadata.get("document_type"),
                         "locationMetadata": chunk_metadata
                     })
@@ -670,6 +826,7 @@ class ProcessFile:
                             "source_figure_id": None,  # Not linking figures in custom chunking
                             "related_image_path": None,
                             "published_date": document_metadata["published_date"],
+                            "expiry_date": document_metadata["expiry_date"],
                             "document_type": document_metadata["document_type"],
                             "locationMetadata": chunk_metadata
                         })

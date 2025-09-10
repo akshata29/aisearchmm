@@ -2,7 +2,7 @@ aiohttp
 aiohttp-cors
 aiofiles
 azure-ai-documentintelligence == 1.0.0
-azure-ai-inference == 1.0.0b6
+azure-ai-inference == 1.0.0b9
 azure-identity
 tqdm 
 python-dotenv
@@ -12,11 +12,14 @@ instructor
 pydantic
 pillow
 rich
+PyPDF2
+pycryptodome
 azure-storage-blob == 12.24.0
 --extra-index-url https://pkgs.dev.azure.com/azure-sdk/public/_packaging/azure-sdk-for-python/pypi/simple/
 azure-search-documents==11.6.0a20250505003
 pyjwt
 
+pycryptodome
 watchdog
 
 # Production dependencies

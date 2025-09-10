@@ -49,6 +49,12 @@ export default defineConfig({
             "/upload": {
                 target: "http://localhost:5000"
             },
+            "/extract_metadata": {
+                target: "http://localhost:5000"
+            },
+            "/get_document_types": {
+                target: "http://localhost:5000"
+            },
             "/upload_status": {
                 target: "http://localhost:5000"
             },

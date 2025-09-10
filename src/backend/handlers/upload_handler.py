@@ -6,6 +6,8 @@ import datetime
 import logging
 import time
 import hashlib
+import PyPDF2
+import io
 from typing import Optional, Dict, Any
 from pathlib import Path
 from aiohttp import web
@@ -355,6 +357,7 @@ class SimpleDocumentUploadHandler:
             upload_id = data.get('upload_id')
             published_date = data.get('published_date')  # Extract metadata
             document_type = data.get('document_type')    # Extract metadata
+            expiry_date = data.get('expiry_date')        # Extract expiry date metadata
             
             # Extract chunking parameters with defaults
             chunk_size = data.get('chunk_size', 500)
@@ -368,7 +371,8 @@ class SimpleDocumentUploadHandler:
                 "chunk_overlap": chunk_overlap,
                 "output_format": output_format,
                 "chunking_strategy": chunking_strategy,
-                "document_type": document_type
+                "document_type": document_type,
+                "expiry_date": expiry_date
             })
             
             if not upload_id or upload_id not in self.processing_status:
@@ -397,7 +401,8 @@ class SimpleDocumentUploadHandler:
             # Store metadata and processing options in processing status for use in background processing
             self.processing_status[upload_id]["metadata"] = {
                 "published_date": published_date,
-                "document_type": document_type
+                "document_type": document_type,
+                "expiry_date": expiry_date
             }
             
             self.processing_status[upload_id]["processing_options"] = {
@@ -522,6 +527,7 @@ class SimpleDocumentUploadHandler:
             metadata = self.processing_status[upload_id].get("metadata", {})
             published_date = metadata.get("published_date")
             document_type = metadata.get("document_type")
+            expiry_date = metadata.get("expiry_date")
             
             processing_options = self.processing_status[upload_id].get("processing_options", {})
             chunk_size = processing_options.get("chunk_size", 500)
@@ -536,6 +542,7 @@ class SimpleDocumentUploadHandler:
                 index_name=os.environ["SEARCH_INDEX_NAME"],
                 published_date=published_date,
                 document_type=document_type,
+                expiry_date=expiry_date,
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap,
                 output_format=output_format,
@@ -593,6 +600,321 @@ class SimpleDocumentUploadHandler:
                 "timestamp": datetime.datetime.now().isoformat(),
                 "details": details,
             })
+
+    def _extract_pdf_metadata_simple(self, file_bytes: bytes) -> dict:
+        """Extract metadata properties from PDF document - standalone utility."""
+        metadata = {
+            "published_date": None,
+            "document_type": None,
+            "expiry_date": None
+        }
+        
+        try:
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            
+            # Check if PDF is encrypted and try to decrypt with empty password
+            if pdf_reader.is_encrypted:
+                try:
+                    # Try to decrypt with empty password (many PDFs are "encrypted" but with no password)
+                    pdf_reader.decrypt("")
+                    logger.info("Successfully decrypted PDF with empty password")
+                except Exception as decrypt_error:
+                    logger.warning(f"PDF is encrypted and cannot be decrypted: {decrypt_error}")
+                    return metadata
+            
+            if pdf_reader.metadata:
+                pdf_metadata = pdf_reader.metadata
+                logger.info(f"Found PDF metadata keys: {list(pdf_metadata.keys())}")
+                
+                # Check for custom properties
+                custom_props = {}
+                
+                # Extract custom properties (these might be in different formats)
+                for key, value in pdf_metadata.items():
+                    if isinstance(key, str):
+                        # Convert PDF metadata keys to lowercase for comparison
+                        lower_key = key.lower().replace('/', '').replace('_', '').replace(' ', '')
+                        
+                        # Map common metadata fields
+                        if 'publishdate' in lower_key or 'published' in lower_key:
+                            custom_props['published_date'] = value
+                        elif 'expirydate' in lower_key or 'expiry' in lower_key or 'expires' in lower_key:
+                            custom_props['expiry_date'] = value
+                        elif 'documenttype' in lower_key or 'doctype' in lower_key or 'type' in lower_key:
+                            custom_props['document_type'] = value
+                        elif 'publisheddate' in lower_key:
+                            custom_props['published_date'] = value
+                
+                # Also check for standard PDF metadata fields
+                if '/CreationDate' in pdf_metadata and not custom_props.get('published_date'):
+                    creation_date = pdf_metadata['/CreationDate']
+                    if creation_date:
+                        custom_props['published_date'] = str(creation_date)
+                
+                logger.info(f"Found custom properties: {custom_props}")
+                
+                # Process extracted properties
+                for prop_name, prop_value in custom_props.items():
+                    if prop_value and str(prop_value).strip():
+                        value_str = str(prop_value).strip()
+                        
+                        if prop_name in ['published_date', 'expiry_date']:
+                            # Try to parse date values
+                            try:
+                                # Handle various date formats
+                                if 'D:' in value_str:  # PDF date format
+                                    # Remove PDF date format prefix and parse
+                                    clean_date = value_str.replace('D:', '').split('+')[0].split('-')[0]
+                                    if len(clean_date) >= 8:
+                                        parsed_date = datetime.datetime.strptime(clean_date[:8], '%Y%m%d')
+                                        metadata[prop_name] = parsed_date.strftime('%Y-%m-%d')
+                                elif '/' in value_str:  # MM/DD/YYYY, MM/DD/YY, DD/MM/YYYY, DD/MM/YY
+                                    parts = value_str.split('/')
+                                    if len(parts) == 3:
+                                        month, day, year = parts
+                                        
+                                        # Handle 2-digit years
+                                        if len(year) == 2:
+                                            year_int = int(year)
+                                            # Assume years 00-30 are 2000-2030, 31-99 are 1931-1999
+                                            if year_int <= 30:
+                                                year = f"20{year}"
+                                            else:
+                                                year = f"19{year}"
+                                        
+                                        # Try MM/DD/YYYY format first
+                                        try:
+                                            parsed_date = datetime.datetime.strptime(f"{month}/{day}/{year}", '%m/%d/%Y')
+                                            metadata[prop_name] = parsed_date.strftime('%Y-%m-%d')
+                                        except ValueError:
+                                            # Try DD/MM/YYYY format
+                                            try:
+                                                parsed_date = datetime.datetime.strptime(f"{day}/{month}/{year}", '%d/%m/%Y')
+                                                metadata[prop_name] = parsed_date.strftime('%Y-%m-%d')
+                                            except ValueError:
+                                                # If both fail, store as-is but log warning
+                                                logger.warning(f"Could not parse {prop_name} date '{value_str}' in either MM/DD/YYYY or DD/MM/YYYY format")
+                                                metadata[prop_name] = value_str
+                                elif '-' in value_str:  # YYYY-MM-DD or similar
+                                    if len(value_str.split('-')) == 3:
+                                        parsed_date = datetime.datetime.strptime(value_str, '%Y-%m-%d')
+                                        metadata[prop_name] = parsed_date.strftime('%Y-%m-%d')
+                                else:
+                                    # Try to parse as simple date string
+                                    metadata[prop_name] = value_str
+                            except Exception as e:
+                                logger.warning(f"Could not parse {prop_name} date '{value_str}': {e}")
+                                metadata[prop_name] = value_str
+                        elif prop_name == 'document_type':
+                            # Map document type values
+                            type_mapping = {
+                                'nvp': 'nyp_columns',
+                                'nvp_columns': 'nyp_columns',
+                                'nyp_columns': 'nyp_columns',
+                                'nl': 'newsletter',
+                                'newsletter': 'newsletter',
+                                'otq': 'otq',
+                                'only_three_questions': 'otq',
+                                'client_reviews': 'client_reviews',
+                                'review': 'client_reviews'
+                            }
+                            
+                            normalized_type = value_str.lower().strip()
+                            metadata[prop_name] = type_mapping.get(normalized_type, normalized_type)
+                
+                logger.info(f"Extracted PDF metadata: {metadata}")
+            else:
+                logger.info("No PDF metadata found in document")
+                
+        except Exception as e:
+            if "PyCryptodome is required" in str(e):
+                logger.warning(f"PDF requires encryption support - install pycryptodome: {e}")
+            else:
+                logger.warning(f"Could not extract PDF metadata: {e}")
+        
+        return metadata
+
+    async def handle_extract_metadata(self, request):
+        """Extract metadata from uploaded PDF file."""
+        try:
+            # Parse multipart form data
+            reader = await request.multipart()
+            file_part = None
+            
+            async for part in reader:
+                if part.name == 'file':
+                    file_part = part
+                    break
+            
+            if not file_part:
+                return web.json_response(
+                    {"error": "No file provided"},
+                    status=400
+                )
+            
+            # Get filename and validate
+            filename = file_part.filename or "unknown.pdf"
+            if not filename.lower().endswith('.pdf'):
+                return web.json_response(
+                    {"error": "Only PDF files are supported for metadata extraction"},
+                    status=400
+                )
+            
+            # Read file content
+            file_content = await file_part.read()
+            
+            if len(file_content) > self.MAX_FILE_SIZE:
+                return web.json_response(
+                    {"error": f"File too large. Maximum size: {self.MAX_FILE_SIZE / (1024*1024):.1f}MB"},
+                    status=400
+                )
+            
+            # Extract metadata using our simple utility function
+            metadata = self._extract_pdf_metadata_simple(file_content)
+            
+            logger.info(f"Final extracted metadata from {filename}: {metadata}")
+            
+            return web.json_response({
+                "success": True,
+                "metadata": metadata,
+                "filename": filename
+            })
+            
+        except Exception as e:
+            logger.error(f"Error extracting metadata: {str(e)}", exc_info=True)
+            return web.json_response(
+                {"error": f"Failed to extract metadata: {str(e)}"},
+                status=500
+            )
+
+    async def handle_extract_metadata(self, request):
+        """Extract metadata from uploaded PDF file."""
+        try:
+            # Parse multipart form data
+            reader = await request.multipart()
+            file_part = None
+            
+            async for part in reader:
+                if part.name == 'file':
+                    file_part = part
+                    break
+            
+            if not file_part:
+                return web.json_response(
+                    {"error": "No file provided"},
+                    status=400
+                )
+            
+            # Get filename and validate
+            filename = file_part.filename or "unknown.pdf"
+            if not filename.lower().endswith('.pdf'):
+                return web.json_response(
+                    {"error": "Only PDF files are supported for metadata extraction"},
+                    status=400
+                )
+            
+            # Read file content
+            file_content = await file_part.read()
+            
+            if len(file_content) > self.MAX_FILE_SIZE:
+                return web.json_response(
+                    {"error": f"File too large. Maximum size: {self.MAX_FILE_SIZE / (1024*1024):.1f}MB"},
+                    status=400
+                )
+            
+            # Extract metadata using our simple utility function
+            metadata = self._extract_pdf_metadata_simple(file_content)
+            
+            logger.info(f"Extracted metadata from {filename}: {metadata}")
+            
+            return web.json_response({
+                "success": True,
+                "metadata": metadata,
+                "filename": filename
+            })
+            
+        except Exception as e:
+            logger.error(f"Error extracting metadata: {str(e)}", exc_info=True)
+            return web.json_response(
+                {"error": f"Failed to extract metadata: {str(e)}"},
+                status=500
+            )
+
+    async def handle_get_document_types(self, request):
+        """Get unique document types from the search index."""
+        try:
+            # Initialize clients if not done
+            if not self.clients:
+                await self.initialize_clients()
+            
+            # Search for unique document types by retrieving all documents and extracting types
+            search_results = await self.clients['search'].search(
+                search_text="*",
+                select=["document_type"],
+                top=1000  # Get a large sample to find all types
+            )
+            
+            # Extract unique document types from search results
+            document_types = set()
+            
+            async for result in search_results:
+                if result.get("document_type"):
+                    document_types.add(result["document_type"])
+            
+            # Convert to list
+            document_types = list(document_types)
+            
+            # Add default types that should always be available (even if no documents exist yet)
+            default_types = [
+                'quarterly_report', 'newsletter', 'articles', 'annual_report',
+                'financial_statement', 'presentation', 'whitepaper', 'research_report',
+                'policy_document', 'manual', 'guide', 'client_reviews', 'nyp_columns',
+                'otq', 'other'
+            ]
+            
+            # Combine and deduplicate
+            all_types = list(set(document_types + default_types))
+            all_types.sort()
+            
+            # Create formatted response with display names
+            type_mapping = {
+                'quarterly_report': 'Quarterly Report',
+                'newsletter': 'Newsletter',
+                'articles': 'Articles',
+                'annual_report': 'Annual Report',
+                'financial_statement': 'Financial Statement',
+                'presentation': 'Presentation',
+                'whitepaper': 'Whitepaper',
+                'research_report': 'Research Report',
+                'policy_document': 'Policy Document',
+                'manual': 'Manual',
+                'guide': 'Guide',
+                'client_reviews': 'Client Reviews',
+                'nyp_columns': 'NYP Columns',
+                'otq': 'Only Three Questions',
+                'other': 'Other'
+            }
+            
+            formatted_types = []
+            for doc_type in all_types:
+                formatted_types.append({
+                    'key': doc_type,
+                    'text': type_mapping.get(doc_type, doc_type.replace('_', ' ').title())
+                })
+            
+            logger.info(f"Retrieved {len(formatted_types)} document types from search index")
+            
+            return web.json_response({
+                "success": True,
+                "document_types": formatted_types
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting document types: {str(e)}", exc_info=True)
+            return web.json_response(
+                {"error": f"Failed to get document types: {str(e)}"},
+                status=500
+            )
 
 
 # Create global instance

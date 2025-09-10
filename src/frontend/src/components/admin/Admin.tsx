@@ -40,6 +40,7 @@ interface DocumentStats {
     total_chunks: number;
     document_type: string;
     published_date?: string;
+    expiry_date?: string;
     text_document_ids: string[];
     image_document_ids: string[];
 }
@@ -53,6 +54,7 @@ interface DocumentChunk {
     image_document_id?: string;
     document_type: string;
     published_date?: string;
+    expiry_date?: string;
     locationMetadata?: any;
 }
 
@@ -283,6 +285,7 @@ export const Admin: React.FC = () => {
                             <TableHeaderCell>Image Chunks</TableHeaderCell>
                             <TableHeaderCell>Total Chunks</TableHeaderCell>
                             <TableHeaderCell>Published Date</TableHeaderCell>
+                            <TableHeaderCell>Expiry Date</TableHeaderCell>
                             <TableHeaderCell>Actions</TableHeaderCell>
                         </TableRow>
                     </TableHeader>
@@ -327,6 +330,11 @@ export const Admin: React.FC = () => {
                                         </Text>
                                     </TableCell>
                                     <TableCell>
+                                        <Text size={200}>
+                                            {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'N/A'}
+                                        </Text>
+                                    </TableCell>
+                                    <TableCell>
                                         <Button
                                             appearance="subtle"
                                             icon={<DeleteRegular />}
@@ -341,7 +349,7 @@ export const Admin: React.FC = () => {
                                 {/* Document Chunks Details */}
                                 {selectedDocument === doc.document_title && (
                                     <TableRow>
-                                        <TableCell colSpan={7}>
+                                        <TableCell colSpan={8}>
                                             <div className="document-chunks-container">
                                                 {chunksLoading ? (
                                                     <div className="chunks-loading">
@@ -424,6 +432,15 @@ export const Admin: React.FC = () => {
                                                                                         <td>
                                                                                             {chunk.published_date 
                                                                                                 ? new Date(chunk.published_date).toLocaleDateString() 
+                                                                                                : 'N/A'
+                                                                                            }
+                                                                                        </td>
+                                                                                    </tr>
+                                                                                    <tr>
+                                                                                        <td>Expiry Date</td>
+                                                                                        <td>
+                                                                                            {chunk.expiry_date 
+                                                                                                ? new Date(chunk.expiry_date).toLocaleDateString() 
                                                                                                 : 'N/A'
                                                                                             }
                                                                                         </td>

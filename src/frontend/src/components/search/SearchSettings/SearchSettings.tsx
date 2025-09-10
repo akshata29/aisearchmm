@@ -52,8 +52,8 @@ export interface SearchConfig {
 }
 
 const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
-    // Document type options - same as in DocumentUpload component for consistency
-    const documentTypeOptions = [
+    // Document types state - will be loaded dynamically
+    const [documentTypeOptions, setDocumentTypeOptions] = React.useState([
         { key: 'quarterly_report', text: 'Quarterly Report' },
         { key: 'newsletter', text: 'Newsletter' },
         { key: 'articles', text: 'Articles' },
@@ -69,7 +69,27 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
         { key: 'nyp_columns', text: 'NYP Columns' },
         { key: 'otq', text: 'Only Three Questions' },
         { key: 'other', text: 'Other' }
-    ];
+    ]);
+
+    // Load document types on component mount
+    React.useEffect(() => {
+        const loadDocumentTypes = async () => {
+            try {
+                const response = await fetch('/get_document_types');
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success && result.document_types) {
+                        setDocumentTypeOptions(result.document_types);
+                    }
+                }
+            } catch (error) {
+                console.warn('Could not load document types from server, using defaults:', error);
+                // Keep the default types that are already set in state
+            }
+        };
+        
+        loadDocumentTypes();
+    }, []);
 
     const handleSwitchChange = (key: keyof typeof config, checked: boolean) => {
         setConfig(prev => {

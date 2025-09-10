@@ -329,6 +329,8 @@ class ProductionApp:
                 web.post("/get_citation_doc", citation_files_handler.handle),
                 # Upload endpoints
                 web.post("/upload", upload_handler.handle_upload),
+                web.post("/extract_metadata", upload_handler.handle_extract_metadata),
+                web.get("/get_document_types", upload_handler.handle_get_document_types),
                 web.post("/process_document", upload_handler.handle_process_document),
                 web.get("/upload_status", upload_handler.handle_status),
             ])
@@ -438,6 +440,7 @@ async def create_search_index_if_not_exists(index_client: SearchIndexClient, ind
         SimpleField(name="related_image_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
         # New metadata fields
         SimpleField(name="published_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
+        SimpleField(name="expiry_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
         SearchableField(name="document_type", type=SearchFieldDataType.String, searchable=True, filterable=True, sortable=True, facetable=True),
         ComplexField(name="locationMetadata", fields=[
             SimpleField(name="pageNumber", type=SearchFieldDataType.Int32, searchable=False, filterable=True, hidden=False, sortable=True, facetable=True),
@@ -587,6 +590,7 @@ async def create_search_index_if_not_exists(index_client: SearchIndexClient, ind
         SimpleField(name="related_image_path", type=SearchFieldDataType.String, searchable=False, filterable=True, hidden=False, sortable=False, facetable=False),
         # New metadata fields
         SimpleField(name="published_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
+        SimpleField(name="expiry_date", type=SearchFieldDataType.DateTimeOffset, searchable=False, filterable=True, sortable=True, facetable=True),
         SearchableField(name="document_type", type=SearchFieldDataType.String, searchable=True, filterable=True, sortable=True, facetable=True),
         ComplexField(name="locationMetadata", fields=[
             SimpleField(name="pageNumber", type=SearchFieldDataType.Int32, searchable=False, filterable=True, hidden=False, sortable=True, facetable=True),

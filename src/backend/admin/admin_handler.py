@@ -83,7 +83,7 @@ class AdminHandler:
             # Get all documents in the index with optimized query
             search_results = await search_client.search(
                 search_text="*",
-                select="document_title,text_document_id,image_document_id,content_id,document_type,published_date",
+                select="document_title,text_document_id,image_document_id,content_id,document_type,published_date,expiry_date",
                 top=self.max_batch_size,
                 timeout=self.timeout_seconds
             )
@@ -101,6 +101,7 @@ class AdminHandler:
                 text_doc_id = result.get("text_document_id")
                 image_doc_id = result.get("image_document_id")
                 published_date = result.get("published_date")
+                expiry_date = result.get("expiry_date")
 
                 if doc_title not in document_stats:
                     document_stats[doc_title] = {
@@ -110,6 +111,7 @@ class AdminHandler:
                         "total_chunks": 0,
                         "document_type": doc_type,
                         "published_date": published_date,
+                        "expiry_date": expiry_date,
                         "text_document_ids": set(),
                         "image_document_ids": set(),
                     }
@@ -467,7 +469,7 @@ class AdminHandler:
             search_results = await search_client.search(
                 search_text="*",
                 filter=f"document_title eq '{escaped_title}'",
-                select="content_id,document_title,content_text,content_path,text_document_id,image_document_id,document_type,published_date,locationMetadata",
+                select="content_id,document_title,content_text,content_path,text_document_id,image_document_id,document_type,published_date,expiry_date,locationMetadata",
                 top=limit,
                 skip=offset,
                 timeout=self.timeout_seconds
@@ -487,6 +489,7 @@ class AdminHandler:
                     "image_document_id": result.get("image_document_id"),
                     "document_type": result.get("document_type"),
                     "published_date": result.get("published_date"),
+                    "expiry_date": result.get("expiry_date"),
                     "locationMetadata": result.get("locationMetadata")
                 }
                 chunks.append(chunk)

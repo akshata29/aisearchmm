@@ -92,15 +92,14 @@ const ProfessionalDocumentUpload: React.FC = () => {
     // Metadata state variables
     const [publishedDate, setPublishedDate] = useState<string>('');
     const [documentType, setDocumentType] = useState<string>('');
+    const [expiryDate, setExpiryDate] = useState<string>('');
     
-    // Processing options state variables
-    const [chunkSize, setChunkSize] = useState<number>(500);
-    const [chunkOverlap, setChunkOverlap] = useState<number>(50);
-    const [outputFormat, setOutputFormat] = useState<string>('markdown');
-    const [chunkingStrategy, setChunkingStrategy] = useState<string>('document_layout');
-
-    // Document type options
-    const documentTypeOptions = [
+    // Metadata extraction state
+    const [extractedMetadata, setExtractedMetadata] = useState<any>(null);
+    const [showMetadataForm, setShowMetadataForm] = useState<boolean>(true);
+    
+    // Document types state
+    const [documentTypeOptions, setDocumentTypeOptions] = useState([
         { key: 'quarterly_report', text: 'Quarterly Report' },
         { key: 'newsletter', text: 'Newsletter' },
         { key: 'articles', text: 'Articles' },
@@ -116,27 +115,122 @@ const ProfessionalDocumentUpload: React.FC = () => {
         { key: 'nyp_columns', text: 'NYP Columns' },
         { key: 'otq', text: 'Only Three Questions' },
         { key: 'other', text: 'Other' }
-    ];
+    ]);
+    
+    // Processing options state variables
+    const [chunkSize, setChunkSize] = useState<number>(500);
+    const [chunkOverlap, setChunkOverlap] = useState<number>(50);
+    const [outputFormat, setOutputFormat] = useState<string>('markdown');
+    const [chunkingStrategy, setChunkingStrategy] = useState<string>('document_layout');
 
-    const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    // Load document types on component mount
+    React.useEffect(() => {
+        const loadDocumentTypes = async () => {
+            try {
+                const response = await fetch('/get_document_types');
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success && result.document_types) {
+                        setDocumentTypeOptions(result.document_types);
+                    }
+                }
+            } catch (error) {
+                console.warn('Could not load document types from server, using defaults:', error);
+                // Keep the default types that are already set in state
+            }
+        };
+        
+        loadDocumentTypes();
+    }, []);
+
+    const extractMetadataFromPDF = async (file: File) => {
+        try {
+            setMessage({ type: 'info', text: 'Extracting metadata from PDF...' });
+            
+            // Create form data to send file to backend
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            // Call backend API to extract metadata
+            const response = await fetch('/extract_metadata', {
+                method: 'POST',
+                body: formData,
+            });
+            
+            const result = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to extract metadata');
+            }
+            
+            if (result.success && result.metadata) {
+                const metadata = result.metadata;
+                
+                // Auto-fill form fields if metadata was found
+                if (metadata.published_date) {
+                    setPublishedDate(metadata.published_date);
+                }
+                if (metadata.document_type) {
+                    setDocumentType(metadata.document_type);
+                }
+                if (metadata.expiry_date) {
+                    setExpiryDate(metadata.expiry_date);
+                }
+                
+                setExtractedMetadata(metadata);
+                
+                // Show success message if any metadata was found
+                const foundFields = [];
+                if (metadata.published_date) foundFields.push('Published Date');
+                if (metadata.document_type) foundFields.push('Document Type');
+                if (metadata.expiry_date) foundFields.push('Expiry Date');
+                
+                if (foundFields.length > 0) {
+                    setMessage({ 
+                        type: 'success', 
+                        text: `PDF metadata extracted: ${foundFields.join(', ')}. Please verify the values before uploading.` 
+                    });
+                } else {
+                    setMessage(null); // Clear the extracting message
+                }
+            } else {
+                setMessage(null); // Clear the extracting message
+            }
+            
+            setShowMetadataForm(true);
+            
+        } catch (error) {
+            console.warn('Could not extract metadata from PDF:', error);
+            setMessage({ 
+                type: 'warning', 
+                text: 'Could not extract metadata from PDF. Please fill in the information manually.' 
+            });
+            setShowMetadataForm(true);
+            setExtractedMetadata(null);
+        }
+    };
+
+    const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
             if (file.type === 'application/pdf') {
                 setSelectedFile(file);
                 setMessage(null);
+                await extractMetadataFromPDF(file);
             } else {
                 setMessage({ type: 'error', text: 'Please select a PDF file.' });
             }
         }
     }, []);
 
-    const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const handleDrop = useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
         event.preventDefault();
         setIsDragOver(false);
         const file = event.dataTransfer.files[0];
         if (file && file.type === 'application/pdf') {
             setSelectedFile(file);
             setMessage(null);
+            await extractMetadataFromPDF(file);
         } else {
             setMessage({ type: 'error', text: 'Please select a PDF file.' });
         }
@@ -321,6 +415,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
                     upload_id: uploadResult.upload_id,
                     published_date: publishedDate,
                     document_type: documentType,
+                    expiry_date: expiryDate || null,
                     chunk_size: chunkSize,
                     chunk_overlap: chunkOverlap,
                     output_format: outputFormat,
@@ -365,6 +460,9 @@ const ProfessionalDocumentUpload: React.FC = () => {
         setMessage(null);
         setPublishedDate('');
         setDocumentType('');
+        setExpiryDate('');
+        setExtractedMetadata(null);
+        setShowMetadataForm(true);
         // Reset processing options to defaults
         setChunkSize(500);
         setChunkOverlap(50);
@@ -461,6 +559,18 @@ const ProfessionalDocumentUpload: React.FC = () => {
                                 </div>
                                 
                                 <div className="form-row">
+                                    <Field label="Expiry Date" hint="Optional - leave blank if document doesn't expire">
+                                        <Input
+                                            type="date"
+                                            value={expiryDate}
+                                            onChange={(e) => setExpiryDate(e.target.value)}
+                                            placeholder="Select expiry date (optional)"
+                                            disabled={uploading}
+                                        />
+                                    </Field>
+                                </div>
+                                
+                                <div className="form-row form-row-span-2">
                                     <Field label="Document Type" required>
                                         <Dropdown
                                             placeholder="Select document type"
