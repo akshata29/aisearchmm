@@ -32,6 +32,7 @@ import {
 } from '@fluentui/react-icons';
 import './Admin.css';
 import { TIMEOUTS } from '../../constants/app';
+import { buildApiUrl } from '../../utils/api-config';
 
 interface DocumentStats {
     document_title: string;
@@ -84,7 +85,7 @@ export const Admin: React.FC = () => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
             
-            const response = await fetch('/api/admin/documents', {
+            const response = await fetch(buildApiUrl('api/admin/documents'), {
                 signal: controller.signal
             });
             
@@ -123,7 +124,7 @@ export const Admin: React.FC = () => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
             
-            const response = await fetch(`/api/admin/document_chunks?document_title=${encodeURIComponent(documentTitle)}`, {
+            const response = await fetch(buildApiUrl(`api/admin/document_chunks?document_title=${encodeURIComponent(documentTitle)}`), {
                 signal: controller.signal
             });
             

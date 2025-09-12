@@ -1,0 +1,38 @@
+FROM node:18-alpine AS build
+
+# Build args for private registry access
+ARG NPM_TOKEN
+ARG NPM_REGISTRY_URL=https://registry.npmjs.org/
+ARG PRIVATE_REGISTRY_URL
+ARG PRIVATE_REGISTRY_TOKEN
+
+WORKDIR /app
+
+# Configure npm for private registry if provided
+RUN if [ -n "$NPM_TOKEN" ]; then \
+      echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc; \
+    fi && \
+    if [ -n "$PRIVATE_REGISTRY_URL" ] && [ -n "$PRIVATE_REGISTRY_TOKEN" ]; then \
+      echo "registry=${PRIVATE_REGISTRY_URL}" >> ~/.npmrc; \
+      echo "//${PRIVATE_REGISTRY_URL#https://}/:_authToken=${PRIVATE_REGISTRY_TOKEN}" >> ~/.npmrc; \
+    fi
+
+COPY package*.json ./
+RUN npm ci --silent
+
+COPY . .
+RUN npm run build
+
+# Runtime stage - secrets are not carried over
+FROM nginx:stable-alpine
+RUN apk add --no-cache bash
+WORKDIR /usr/share/nginx/html
+COPY --from=build /app/dist ./
+
+# Runtime config injection files
+COPY env-config.template.js ./
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 80
+ENTRYPOINT ["/entrypoint.sh"]

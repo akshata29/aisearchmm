@@ -7,7 +7,6 @@ import {
     Button,
     ProgressBar,
     Text,
-    Title1,
     Title2,
     Body1,
     Caption1,
@@ -44,6 +43,7 @@ import {
 import './DocumentUpload.css';
 import { deleteIndex as deleteIndexApi } from '../../../api/api';
 import { TIMEOUTS } from '../../../constants/app';
+import { buildApiUrl } from '../../../utils/api-config';
 
 interface ProcessingDetails {
     steps: Array<{
@@ -98,6 +98,10 @@ const ProfessionalDocumentUpload: React.FC = () => {
     const [extractedMetadata, setExtractedMetadata] = useState<any>(null);
     const [showMetadataForm, setShowMetadataForm] = useState<boolean>(true);
     
+    // Suppress unused variable warnings - these are used in callbacks
+    void extractedMetadata;
+    void showMetadataForm;
+    
     // Document types state
     const [documentTypeOptions, setDocumentTypeOptions] = useState([
         { key: 'quarterly_report', text: 'Quarterly Report' },
@@ -127,7 +131,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
     React.useEffect(() => {
         const loadDocumentTypes = async () => {
             try {
-                const response = await fetch('/get_document_types');
+                const response = await fetch(buildApiUrl('get_document_types'));
                 if (response.ok) {
                     const result = await response.json();
                     if (result.success && result.document_types) {
@@ -152,7 +156,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
             formData.append('file', file);
             
             // Call backend API to extract metadata
-            const response = await fetch('/extract_metadata', {
+            const response = await fetch(buildApiUrl('extract_metadata'), {
                 method: 'POST',
                 body: formData,
             });
@@ -257,7 +261,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
                 const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
 
                 try {
-                    const response = await fetch(`/upload_status?upload_id=${uploadId}`, {
+                    const response = await fetch(buildApiUrl(`upload_status?upload_id=${uploadId}`), {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
@@ -389,7 +393,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
             const uploadController = new AbortController();
             const uploadTimeoutId = setTimeout(() => uploadController.abort(), TIMEOUTS.UPLOAD);
 
-            const uploadResponse = await fetch('/upload', {
+            const uploadResponse = await fetch(buildApiUrl('upload'), {
                 method: 'POST',
                 body: formData,
                 signal: uploadController.signal,
@@ -406,7 +410,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
             const processController = new AbortController();
             const processTimeoutId = setTimeout(() => processController.abort(), TIMEOUTS.PROCESSING);
 
-            const processResponse = await fetch('/process_document', {
+            const processResponse = await fetch(buildApiUrl('process_document'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

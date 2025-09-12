@@ -35,7 +35,7 @@ const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg, darkMode
                     {Object.keys(processingStepMsg).map(key => (
                         <>
                             <a>Request: {key}</a>
-                            {processingStepMsg[key].map((msg, index) => (
+                            {processingStepMsg[key]?.map((msg, index) => (
                                 <div key={index} className="timeline-item">
                                     <div className="timeline-icon">{index + 1}</div>
                                     <div className="timeline-content">
@@ -98,7 +98,7 @@ const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg, darkMode
                     ))}
                 </div>
 
-                <DialogSurface className="editor-dialog" mountNode={undefined}>
+                <DialogSurface className="editor-dialog">
                     <DialogBody>
                         <DialogContent>
                             <Editor height="700px" defaultLanguage="json" defaultValue={editorJSON || ""} theme={darkMode ? "vs-dark" : "vs"} />

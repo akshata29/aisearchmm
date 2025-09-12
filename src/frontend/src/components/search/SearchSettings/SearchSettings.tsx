@@ -17,6 +17,7 @@ import {
 import { Dismiss24Regular } from "@fluentui/react-icons";
 
 import { OpenAIAPIMode } from "../../../api/models";
+import { buildApiUrl } from "../../../utils/api-config";
 import "./SearchSettings.css";
 
 interface Props {
@@ -75,7 +76,7 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     React.useEffect(() => {
         const loadDocumentTypes = async () => {
             try {
-                const response = await fetch('/get_document_types');
+                const response = await fetch(buildApiUrl('get_document_types'));
                 if (response.ok) {
                     const result = await response.json();
                     if (result.success && result.document_types) {

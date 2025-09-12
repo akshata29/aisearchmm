@@ -21,7 +21,7 @@ export default defineConfig({
         }
     },
     build: {
-        outDir: "../backend/static",
+        outDir: process.env.NODE_ENV === 'production' && process.env.DOCKER_BUILD ? './dist' : "../backend/static",
         emptyOutDir: true,
         sourcemap: true,
         target: "esnext",
@@ -65,6 +65,9 @@ export default defineConfig({
                 target: "http://localhost:5000"
             },
             "/api/delete_index": {
+                target: "http://localhost:5000"
+            },
+            "/api/auth": {
                 target: "http://localhost:5000"
             },
             "/api/admin": {

@@ -2,6 +2,7 @@ import { EventSourceMessage, fetchEventSource } from "@microsoft/fetch-event-sou
 
 import { SearchConfig } from "../components/search/SearchSettings/SearchSettings";
 import { TIMEOUTS } from "../constants/app";
+import { buildApiUrl } from "../utils/api-config";
 
 const sendChatApi = async (
     message: string,
@@ -11,7 +12,7 @@ const sendChatApi = async (
     onMessage: (message: EventSourceMessage) => void,
     onError?: (err: unknown) => void
 ) => {
-    const endpoint = "/chat";
+    const endpoint = buildApiUrl("chat");
 
     // Create AbortController for timeout handling
     const controller = new AbortController();
@@ -54,13 +55,13 @@ const sendChatApi = async (
 };
 
 const listIndexes = async () => {
-    const response = await fetch(`/list_indexes`);
+    const response = await fetch(buildApiUrl("list_indexes"));
 
     return await response.json();
 };
 
 const getCitationDocument = async (fileName: string) => {
-    const response = await fetch(`/get_citation_doc`, {
+    const response = await fetch(buildApiUrl("get_citation_doc"), {
         method: "POST",
         body: JSON.stringify({ fileName })
     });
@@ -70,7 +71,7 @@ const getCitationDocument = async (fileName: string) => {
 
 const deleteIndex = async () => {
     const tryCall = async (path: string) => {
-        const res = await fetch(path, {
+        const res = await fetch(buildApiUrl(path), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ cascade: true })
@@ -82,9 +83,9 @@ const deleteIndex = async () => {
     };
 
     // Prefer namespaced route in dev/prod, but fall back if unavailable
-    let { res, out } = await tryCall(`/api/delete_index`).catch(() => ({ res: undefined as any, out: { error: 'network' } }));
+    let { res, out } = await tryCall(`api/delete_index`).catch(() => ({ res: undefined as any, out: { error: 'network' } }));
     if (!res || res.status === 404 || res.status === 405) {
-        ({ res, out } = await tryCall(`/delete_index`));
+        ({ res, out } = await tryCall(`delete_index`));
     }
     if (!res.ok) {
         throw new Error(out?.error || `Failed to delete index (HTTP ${res.status})`);

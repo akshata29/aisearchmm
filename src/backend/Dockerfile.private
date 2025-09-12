@@ -1,0 +1,64 @@
+FROM python:3.11-slim AS builder
+
+# Build args for private PyPI access
+ARG PIP_INDEX_URL=https://pypi.org/simple/
+ARG PIP_EXTRA_INDEX_URL
+ARG PIP_TRUSTED_HOST
+ARG PRIVATE_PIP_TOKEN
+ARG PRIVATE_PIP_USERNAME
+
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies needed for building
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    ca-certificates \
+    git \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Configure pip for private repository if provided
+RUN if [ -n "$PRIVATE_PIP_TOKEN" ] && [ -n "$PRIVATE_PIP_USERNAME" ]; then \
+      mkdir -p ~/.config/pip && \
+      echo "[global]" > ~/.config/pip/pip.conf && \
+      echo "index-url = ${PIP_INDEX_URL}" >> ~/.config/pip/pip.conf && \
+      if [ -n "$PIP_EXTRA_INDEX_URL" ]; then \
+        echo "extra-index-url = ${PIP_EXTRA_INDEX_URL}" >> ~/.config/pip/pip.conf; \
+      fi && \
+      if [ -n "$PIP_TRUSTED_HOST" ]; then \
+        echo "trusted-host = ${PIP_TRUSTED_HOST}" >> ~/.config/pip/pip.conf; \
+      fi; \
+    fi
+
+# Copy and install Python dependencies
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+# Copy application code
+COPY . .
+
+# Runtime stage - clean slate without build secrets
+FROM python:3.11-slim
+ENV PYTHONUNBUFFERED=1
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy installed packages and application from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /app .
+
+# Expose port
+EXPOSE 8080
+
+# Use Gunicorn with aiohttp worker
+ENV PORT=8080
+CMD ["gunicorn", "wsgi:app", "-k", "aiohttp.GunicornWebWorker", "-b", "0.0.0.0:8080", "--workers", "1"]

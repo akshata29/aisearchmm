@@ -219,13 +219,34 @@ class SecurityMiddleware:
         return response
 
     def _add_security_headers(self, response: web.Response) -> None:
-        """Add security headers to response."""
+        """Add comprehensive security headers to response."""
+        # Comprehensive CSP policy that allows necessary resources while maintaining security
+        csp_policy = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "  # Allow inline scripts and eval for React/Vite
+            "style-src 'self' 'unsafe-inline' data:; "  # Allow inline styles and data URLs for fonts
+            "img-src 'self' *.blob.core.windows.net *.azureedge.net data: blob: https:; "  # Allow Azure storage and common image sources
+            "font-src 'self' data: https: *.gstatic.com *.googleapis.com; "  # Allow web fonts
+            "connect-src 'self' *.blob.core.windows.net *.azure.com *.azureedge.net *.openai.azure.com wss: ws:; "  # Allow API connections
+            "media-src 'self' *.blob.core.windows.net data: blob:; "  # Allow media files from storage
+            "object-src 'none'; "  # Block plugins for security
+            "frame-src 'self'; "  # Allow same-origin frames
+            "worker-src 'self' blob:; "  # Allow web workers
+            "child-src 'self' blob:; "  # Allow child contexts
+            "manifest-src 'self'; "  # Allow web app manifest
+            "form-action 'self'; "  # Restrict form submissions
+            "base-uri 'self'; "  # Restrict base URI
+            "upgrade-insecure-requests"  # Upgrade HTTP to HTTPS
+        )
+        
         headers = {
             'X-Content-Type-Options': 'nosniff',
-            'X-Frame-Options': 'DENY',
+            'X-Frame-Options': 'SAMEORIGIN',  # Allow same-origin frames (less restrictive than DENY)
             'X-XSS-Protection': '1; mode=block',
             'Referrer-Policy': 'strict-origin-when-cross-origin',
-            'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
+            'Content-Security-Policy': csp_policy,
+            'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',  # Enforce HTTPS
+            'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',  # Restrict sensitive permissions
         }
         
         for header, value in headers.items():

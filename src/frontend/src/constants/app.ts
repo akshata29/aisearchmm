@@ -1,6 +1,7 @@
 /**
  * Application constants
  */
+import { buildApiUrl } from '../utils/api-config';
 
 // App information
 export const APP_NAME = "AI Search Multimodal";
@@ -13,14 +14,14 @@ export const INTRO_TEXT =
 
 // API Constants
 export const API_ENDPOINTS = {
-    CHAT: "/chat",
-    LIST_INDEXES: "/list_indexes",
-    GET_CITATION_DOC: "/get_citation_doc",
-    UPLOAD: "/upload",
-    UPLOAD_STATUS: "/upload_status",
-    PROCESS_DOCUMENT: "/process_document",
-    DELETE_INDEX: "/delete_index",
-    ADMIN: "/api/admin"
+    CHAT: buildApiUrl("chat"),
+    LIST_INDEXES: buildApiUrl("list_indexes"),
+    GET_CITATION_DOC: buildApiUrl("get_citation_doc"),
+    UPLOAD: buildApiUrl("upload"),
+    UPLOAD_STATUS: buildApiUrl("upload_status"),
+    PROCESS_DOCUMENT: buildApiUrl("process_document"),
+    DELETE_INDEX: buildApiUrl("delete_index"),
+    ADMIN: buildApiUrl("api/admin")
 } as const;
 
 // Default configurations

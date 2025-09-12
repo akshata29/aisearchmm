@@ -136,10 +136,6 @@ class SimpleDocumentUploadHandler:
 
         async def get_embedding_clients():
             try:
-                # Probe once with a tiny request to validate deployment
-                _ = await openai_embedding_client.embeddings.create(
-                    input=["ping"], model=deployment_name
-                )
                 aoai_client = AzureOpenAIEmbeddingClient(openai_embedding_client, deployment_name)
                 return aoai_client, aoai_client
             except Exception as e:
@@ -212,7 +208,8 @@ class SimpleDocumentUploadHandler:
         # Initialize Blob Storage client
         self.clients['blob_service'] = BlobServiceClient(
             account_url=os.environ["ARTIFACTS_STORAGE_ACCOUNT_URL"],
-            credential=self.credential,
+            #credential=self.credential,
+            credential=os.environ["ARTIFACTS_STORAGE_ACCOUNT_KEY"],
         )
         self.clients['blob_container'] = self.clients['blob_service'].get_container_client(
             os.environ["ARTIFACTS_STORAGE_CONTAINER"]

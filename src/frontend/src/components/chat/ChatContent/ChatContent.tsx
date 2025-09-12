@@ -72,12 +72,13 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
     useEffect(() => {
         if (thread.length > 0) {
             const lastMessage = thread[thread.length - 1];
-            if (lastMessage.role === RoleType.Assistant && lastMessage.type === ThreadType.Answer) {
+            if (lastMessage && lastMessage.role === RoleType.Assistant && lastMessage.type === ThreadType.Answer) {
                 setIsTyping(true);
                 const timer = setTimeout(() => setIsTyping(false), 1000);
                 return () => clearTimeout(timer);
             }
         }
+        return undefined;
     }, [thread]);
 
     const messagesGroupedByRequestId = Object.values(
@@ -85,7 +86,7 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
             if (!acc[message.request_id]) {
                 acc[message.request_id] = [];
             }
-            acc[message.request_id].push(message);
+            acc[message.request_id]?.push(message);
             return acc;
         }, {})
     );
@@ -169,9 +170,10 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
         console.log("DEBUG: Available processing step keys:", Object.keys(processingStepMsg));
         
         // First try exact match
-        if (processingStepMsg?.[message.request_id] && processingStepMsg[message.request_id].length > 0) {
+        const messageSteps = processingStepMsg?.[message.request_id];
+        if (messageSteps && messageSteps.length > 0) {
             console.log("DEBUG: Found exact match for", message.request_id);
-            return processingStepMsg[message.request_id];
+            return messageSteps;
         }
         
         // If exact match fails, try to find by timestamp proximity or other criteria
@@ -199,9 +201,9 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
         const allStepKeys = Object.keys(processingStepMsg);
         if (allStepKeys.length > 0) {
             const latestStepKey = allStepKeys[allStepKeys.length - 1];
-            if (processingStepMsg[latestStepKey] && processingStepMsg[latestStepKey].length > 0) {
+            if (latestStepKey && processingStepMsg[latestStepKey] && processingStepMsg[latestStepKey]?.length > 0) {
                 console.log("DEBUG: Using latest processing steps as fallback");
-                return processingStepMsg[latestStepKey];
+                return processingStepMsg[latestStepKey] || null;
             }
         }
         
@@ -317,8 +319,8 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                         const mainMessages = group.filter(msg => msg.type !== ThreadType.Citation);
                         // Find citation data from citation messages
                         const citationMessages = group.filter(msg => msg.type === ThreadType.Citation);
-                        const imageCitations = citationMessages.length > 0 ? citationMessages[0].imageCitations || [] : [];
-                        const textCitations = citationMessages.length > 0 ? citationMessages[0].textCitations || [] : [];
+                        const imageCitations = citationMessages.length > 0 ? citationMessages[0]?.imageCitations || [] : [];
+                        const textCitations = citationMessages.length > 0 ? citationMessages[0]?.textCitations || [] : [];
                         
                         return (
                             <div key={groupIndex} className="conversation-group-modern">
@@ -633,7 +635,7 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                                                                     <Citations
                                                                         imageCitations={imageCitations}
                                                                         textCitations={textCitations}
-                                                                        highlightedCitation={highlightedCitation}
+                                                                        {...(highlightedCitation && { highlightedCitation })}
                                                                     />
                                                                 </div>
                                                             </>
