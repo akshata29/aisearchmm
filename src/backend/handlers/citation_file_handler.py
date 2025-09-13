@@ -292,10 +292,67 @@ class CitationFilesHandler:
             # Get blob client
             blob_client = container_client.get_blob_client(normalized_blob_name)
 
-            # Check if blob exists. If key-based auth is rejected by the service,
-            # try an AAD-backed client (DefaultAzureCredential) and/or fall back
-            # to account-key SAS using an available key.
-            blob_exists = await blob_client.exists()
+            # Check if blob exists. If the underlying HTTP transport has been
+            # closed (e.g., the shared BlobServiceClient was closed elsewhere),
+            # recreate a temporary client and retry. This makes the handler
+            # resilient to bundles being closed externally while still allowing
+            # shared clients to be reused normally.
+            blob_exists = None
+            temp_recreated_client = None
+            temp_recreated_cred = None
+            try:
+                try:
+                    blob_exists = await blob_client.exists()
+                except ValueError as ve:
+                    # Detect closed transport and attempt to recreate a client
+                    if 'HTTP transport has already been closed' in str(ve) or 'already been closed' in str(ve):
+                        logger.warning("Detected closed HTTP transport on blob client; recreating temporary client to retry", extra={"request_id": request_id, "blob_name": normalized_blob_name})
+
+                        # Try to determine account url
+                        account_url = getattr(container_client, 'url', None) or getattr(blob_service_client, 'url', None)
+                        if not account_url:
+                            account_name = getattr(blob_client, 'account_name', None) or getattr(blob_service_client, 'account_name', None)
+                            account_url = f"https://{account_name}.blob.core.windows.net"
+
+                        # Prefer AAD credential if auth mode indicates Managed Identity or if bundle credential present
+                        try:
+                            if auth_mode == AuthMode.MANAGED_IDENTITY or getattr(blob_service_client, 'credential', None) is None or not isinstance(getattr(blob_service_client, 'credential', None), str):
+                                # Use bundle credential if available and looks like an AAD credential
+                                bundle_cred = getattr(blob_service_client, 'credential', None)
+                                if bundle_cred is not None and hasattr(bundle_cred, 'get_token'):
+                                    temp_recreated_cred = bundle_cred
+                                else:
+                                    temp_recreated_cred = DefaultAzureCredential()
+
+                                temp_recreated_client = BlobServiceClient(account_url=account_url, credential=temp_recreated_cred)
+                            else:
+                                # Fall back to account key if available in environment
+                                account_key = os.environ.get('ARTIFACTS_STORAGE_ACCOUNT_KEY')
+                                if account_key:
+                                    temp_recreated_client = BlobServiceClient(account_url=account_url, credential=account_key)
+                                else:
+                                    # As a last resort, create anonymous client (may fail)
+                                    temp_recreated_client = BlobServiceClient(account_url=account_url)
+
+                            temp_container = temp_recreated_client.get_container_client(container_client.container_name)
+                            temp_blob = temp_container.get_blob_client(normalized_blob_name)
+                            blob_exists = await temp_blob.exists()
+                            # Replace blob_client for downstream operations so we use the working client
+                            blob_client = temp_blob
+                            container_client = temp_container
+                        except Exception:
+                            logger.error("Failed recreating temporary BlobServiceClient after detecting closed transport", extra={"request_id": request_id}, exc_info=True)
+                            raise
+                    else:
+                        raise
+            finally:
+                # Do not close the temp_recreated_client here; it may be used below for user-delegation key
+                # cleanup happens later where necessary (we'll close any temp clients after user-delegation usage)
+                pass
+
+            if blob_exists is None:
+                # If still None, something else went wrong
+                raise AzureError("Could not determine blob existence due to transport error")
             if not blob_exists:
                 logger.warning("Requested blob does not exist", extra={
                     "request_id": request_id,
@@ -343,6 +400,11 @@ class CitationFilesHandler:
                     # a Bearer token. We log the behavior so it is visible in production.
                     temp_cred = None
                     temp_blob_service_client = None
+                    # If we previously recreated a temp client due to closed transport,
+                    # reuse those variables so the finally block below will close them.
+                    if 'temp_recreated_client' in locals() and temp_recreated_client is not None:
+                        temp_blob_service_client = temp_recreated_client
+                        temp_cred = locals().get('temp_recreated_cred', None)
                     try:
                         cred = getattr(blob_service_client, 'credential', None)
                         needs_temp_aad = not (cred is not None and hasattr(cred, 'get_token'))

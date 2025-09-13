@@ -27,6 +27,43 @@ interface TimelineProps {
 
 const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg, darkMode = false }) => {
     const [editorJSON, setEditorJSON] = React.useState<string | undefined>();
+    // Detect whether Monaco (or its loader/require) is available in the page.
+    // On some Azure deployments the CDN loader/worker may be blocked which causes
+    // the Editor to show a permanent "Loading..." placeholder. In that case we
+    // render a plain <pre> JSON fallback so the user can still read processing steps.
+    const [monacoReady, setMonacoReady] = React.useState<boolean | null>(null);
+
+    React.useEffect(() => {
+        if (typeof window === "undefined") {
+            setMonacoReady(false);
+            return;
+        }
+
+        // If monaco or AMD require is already present, consider Monaco available.
+        if ((window as any).monaco || (window as any).require) {
+            setMonacoReady(true);
+            return;
+        }
+
+        // Wait briefly for loader to arrive; if it doesn't, fall back.
+        const interval = setInterval(() => {
+            if ((window as any).monaco || (window as any).require) {
+                setMonacoReady(true);
+                clearInterval(interval);
+                clearTimeout(timeout);
+            }
+        }, 200);
+
+        const timeout = setTimeout(() => {
+            setMonacoReady(false);
+            clearInterval(interval);
+        }, 1500);
+
+        return () => {
+            clearInterval(interval);
+            clearTimeout(timeout);
+        };
+    }, []);
     
     return (
         <>
@@ -55,13 +92,20 @@ const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg, darkMode
                                             <Body1 block>{msg.processingStep.content}</Body1>
                                         ) : (
                                             <>
-                                                <Editor
-                                                    className="content-editor"
-                                                    height="200px"
-                                                    defaultLanguage="json"
-                                                    defaultValue={JSON.stringify(msg.processingStep.content, null, 2)}
-                                                    theme={darkMode ? "vs-dark" : "vs"}
-                                                />
+                                                {monacoReady === true ? (
+                                                    <Editor
+                                                        className="content-editor"
+                                                        height="200px"
+                                                        defaultLanguage="json"
+                                                        defaultValue={JSON.stringify(msg.processingStep.content, null, 2)}
+                                                        theme={darkMode ? "vs-dark" : "vs"}
+                                                    />
+                                                ) : (
+                                                    // Fallback when Monaco isn't available: show readable JSON
+                                                    <pre style={{ whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>
+                                                        {JSON.stringify(msg.processingStep.content, null, 2)}
+                                                    </pre>
+                                                )}
                                                 {Array.isArray(msg.processingStep.content) && (
                                                     <div className="image-container">
                                                         <Body2 className="image-title">Images passed to LLM</Body2> <br />
@@ -98,18 +142,22 @@ const VerticalTimeline: React.FC<TimelineProps> = ({ processingStepMsg, darkMode
                     ))}
                 </div>
 
-                <DialogSurface className="editor-dialog">
-                    <DialogBody>
-                        <DialogContent>
-                            <Editor height="700px" defaultLanguage="json" defaultValue={editorJSON || ""} theme={darkMode ? "vs-dark" : "vs"} />
-                        </DialogContent>
-                        <DialogActions>
-                            <DialogTrigger disableButtonEnhancement>
-                                <Button appearance="secondary">Close</Button>
-                            </DialogTrigger>
-                        </DialogActions>
-                    </DialogBody>
-                </DialogSurface>
+                        <DialogSurface className="editor-dialog">
+                            <DialogBody>
+                                <DialogContent>
+                                    {monacoReady === true ? (
+                                        <Editor height="700px" defaultLanguage="json" defaultValue={editorJSON || ""} theme={darkMode ? "vs-dark" : "vs"} />
+                                    ) : (
+                                        <pre style={{ whiteSpace: "pre-wrap", maxHeight: 700, overflow: "auto" }}>{editorJSON || ""}</pre>
+                                    )}
+                                </DialogContent>
+                                <DialogActions>
+                                    <DialogTrigger disableButtonEnhancement>
+                                        <Button appearance="secondary">Close</Button>
+                                    </DialogTrigger>
+                                </DialogActions>
+                            </DialogBody>
+                        </DialogSurface>
             </Dialog>
         </>
     );
