@@ -66,9 +66,9 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
         { key: 'policy_document', text: 'Policy Document' },
         { key: 'manual', text: 'Manual' },
         { key: 'guide', text: 'Guide' },
-        { key: 'client_reviews', text: 'Client Reviews' },
-        { key: 'nyp_columns', text: 'NYP Columns' },
-        { key: 'otq', text: 'Only Three Questions' },
+        { key: 'cr', text: 'Client Reviews' },
+        { key: 'Nyp, Nl', text: 'NYP Columns' },
+        { key: 'book', text: 'Only Three Questions' },
         { key: 'other', text: 'Other' }
     ]);
 
@@ -136,7 +136,7 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     };
 
     const handleDocumentTypesChange = (newTypes: string[]) => {
-        // Ensure proper ordering: otq, nyp_columns, client_reviews first, then others
+        // Ensure proper ordering: book, nyp, Nl, cr first, then others
         const orderedTypes = orderDocumentTypes(newTypes);
         setConfig(prev => ({
             ...prev,
@@ -145,7 +145,7 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     };
 
     const orderDocumentTypes = (types: string[]): string[] => {
-        const priorityOrder = ["otq", "nyp_columns", "client_reviews"];
+        const priorityOrder = ["book", "Nyp,Nl", "cr"];
         const orderedTypes: string[] = [];
         
         // Add priority types first if they exist in the list
@@ -187,7 +187,7 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     // Ensure default document types are set if none exist
     React.useEffect(() => {
         if (!config.preferred_document_types || config.preferred_document_types.length === 0) {
-            handleDocumentTypesChange(["otq", "nyp_columns", "client_reviews"]);
+            handleDocumentTypesChange(["book", "Nyp,Nl", "cr"]);
         }
     }, []);
 

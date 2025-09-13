@@ -85,9 +85,9 @@ class DocumentPerChunkDataModel(DataModel):
         
         # If no document types specified, default to the core 3 in order
         if not preferred_doc_types:
-            preferred_doc_types = ["otq", "nyp_columns", "client_reviews"]
+            preferred_doc_types = ["book", "Nyp, Nl", "cr"]
         else:
-            # Ensure proper ordering: otq, nyp_columns, client_reviews first, then others
+            # Ensure proper ordering: book, Nyp, Nl, cr first, then others
             preferred_doc_types = self._order_document_types(preferred_doc_types)
         
         if preferred_doc_types:
@@ -208,9 +208,9 @@ class DocumentPerChunkDataModel(DataModel):
         
         # If no document types specified, default to the core 3 in order
         if not preferred_doc_types:
-            preferred_doc_types = ["otq", "nyp_columns", "client_reviews"]
+            preferred_doc_types = ["book", "Nyp, Nl", "cr"]
         else:
-            # Ensure proper ordering: otq, nyp_columns, client_reviews first, then others
+            # Ensure proper ordering: book, Nyp, Nl, cr first, then others
             preferred_doc_types = self._order_document_types(preferred_doc_types)
         
         if preferred_doc_types:
@@ -233,8 +233,8 @@ class DocumentPerChunkDataModel(DataModel):
         return payload
 
     def _order_document_types(self, doc_types: List[str]) -> List[str]:
-        """Ensure document types follow the preferred order: otq, nyp_columns, client_reviews, then others."""
-        priority_order = ["otq", "nyp_columns", "client_reviews"]
+        """Ensure document types follow the preferred order: book, Nyp, Nl, cr, then others."""
+        priority_order = ["book", "Nyp, Nl", "cr"]
         ordered_types = []
         
         # Add priority types first if they exist in the list

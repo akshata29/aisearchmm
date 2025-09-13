@@ -72,9 +72,9 @@ class SearchGroundingRetriever(GroundingRetriever):
             # Log document type filtering information
             preferred_doc_types = options.get("preferred_document_types", [])
             if not preferred_doc_types:
-                logger.info("Search grounding: Using default document types: otq, nyp_columns, client_reviews")
+                logger.info("Search grounding: Using default document types: book, Nyp, Nl, cr")
                 if processing_step_callback:
-                    await processing_step_callback("📋 Using default document types: Only Three Questions, NYP Columns, Client Reviews")
+                    await processing_step_callback("📋 Using default document types: Book, Nyp, Nl, Client Reviews")
             else:
                 # Ensure proper ordering
                 ordered_doc_types = self._order_document_types(preferred_doc_types)
@@ -88,11 +88,11 @@ class SearchGroundingRetriever(GroundingRetriever):
                 if processing_step_callback:
                     type_names = []
                     for doc_type in ordered_doc_types:
-                        if doc_type == "otq":
-                            type_names.append("Only Three Questions")
-                        elif doc_type == "nyp_columns":
-                            type_names.append("NYP Columns")
-                        elif doc_type == "client_reviews":
+                        if doc_type == "book":
+                            type_names.append("Book")
+                        elif doc_type == "nyp":
+                            type_names.append("Nyp, Nl")
+                        elif doc_type == "cr":
                             type_names.append("Client Reviews")
                         else:
                             type_names.append(doc_type.replace("_", " ").title())
@@ -659,8 +659,8 @@ For hybrid search scenarios, focus on:
         return extracted_citations
 
     def _order_document_types(self, doc_types: List[str]) -> List[str]:
-        """Ensure document types follow the preferred order: otq, nyp_columns, client_reviews, then others."""
-        priority_order = ["otq", "nyp_columns", "client_reviews"]
+        """Ensure document types follow the preferred order: book, nyp, Nl, cr, then others."""
+        priority_order = ["book", "nyp", "Nl", "cr"]
         ordered_types = []
         
         # Add priority types first if they exist in the list

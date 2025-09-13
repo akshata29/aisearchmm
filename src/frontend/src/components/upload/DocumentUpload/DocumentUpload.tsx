@@ -116,9 +116,9 @@ const ProfessionalDocumentUpload: React.FC = () => {
         { key: 'policy_document', text: 'Policy Document' },
         { key: 'manual', text: 'Manual' },
         { key: 'guide', text: 'Guide' },
-        { key: 'client_reviews', text: 'Client Reviews' },
-        { key: 'nyp_columns', text: 'NYP Columns' },
-        { key: 'otq', text: 'Only Three Questions' },
+        { key: 'cr', text: 'Client Reviews' },
+        { key: 'Nyp, Nl', text: 'NYP Columns' },
+        { key: 'book', text: 'Only Three Questions' },
         { key: 'other', text: 'Other' }
     ]);
     

@@ -370,7 +370,11 @@ class SimpleDocumentUploadHandler:
 
             # Start processing in background with proper task management
             loop = asyncio.get_running_loop()
-            task = loop.create_task(self._process_document_async(upload_id, file_path, filename, bundle_clients))
+            # Pass transient_clients into the background task so the async worker
+            # knows which clients it is responsible for closing. This prevents
+            # accidentally closing shared SessionClients (e.g., bundle.blob_service_client)
+            # which are reused across requests.
+            task = loop.create_task(self._process_document_async(upload_id, file_path, filename, bundle_clients, transient_clients))
             
             # Store the task to prevent it from being garbage collected
             if not hasattr(self, '_background_tasks'):
@@ -401,7 +405,7 @@ class SimpleDocumentUploadHandler:
         
         return web.json_response(self.processing_status[upload_id])
 
-    async def _process_document_async(self, upload_id, file_path, filename, bundle_clients):
+    async def _process_document_async(self, upload_id, file_path, filename, bundle_clients, transient_clients=None):
         """Process document asynchronously with detailed progress tracking"""
         try:
             # Initialize detailed tracking
@@ -529,40 +533,37 @@ class SimpleDocumentUploadHandler:
             })
             print(f"Document processing error for {upload_id}: {e}")
         finally:
-            # Close any clients in bundle_clients that are not the handler-level cached clients
+            # Only close clients that were created for this request (transient_clients).
+            # Do NOT attempt to close shared/bundled clients (e.g., bundle.blob_service_client)
+            # which are managed by ClientFactory and may be reused by other requests.
             try:
-                if bundle_clients:
-                    for key, client_obj in list(bundle_clients.items()):
+                if transient_clients:
+                    for client_obj in list(transient_clients):
                         try:
-                            # Skip if this client is the same object as the handler-level cached client
-                            if getattr(self, 'clients', None) and self.clients.get(key) is client_obj:
-                                continue
-
                             if client_obj is None:
                                 continue
 
-                            # Prefer async close
                             if hasattr(client_obj, 'aclose') and callable(getattr(client_obj, 'aclose')):
                                 try:
                                     await client_obj.aclose()
-                                    logger.debug("Closed transient async client", extra={"client_key": key})
+                                    logger.debug("Closed transient async client", extra={"client": type(client_obj).__name__})
                                 except Exception:
-                                    logger.debug("Error closing client aclose()", extra={"client_key": key}, exc_info=True)
+                                    logger.debug("Error closing client aclose()", extra={"client": type(client_obj).__name__}, exc_info=True)
                             elif hasattr(client_obj, 'close') and callable(getattr(client_obj, 'close')):
                                 try:
                                     result = client_obj.close()
                                     import asyncio as _asyncio
                                     if _asyncio.iscoroutine(result):
                                         await result
-                                        logger.debug("Awaited async close() on client", extra={"client_key": key})
+                                        logger.debug("Awaited async close() on client", extra={"client": type(client_obj).__name__})
                                     else:
-                                        logger.debug("Called sync close() on client", extra={"client_key": key})
+                                        logger.debug("Called sync close() on client", extra={"client": type(client_obj).__name__})
                                 except Exception:
-                                    logger.debug("Error calling client's close()", extra={"client_key": key}, exc_info=True)
+                                    logger.debug("Error calling client's close()", extra={"client": type(client_obj).__name__}, exc_info=True)
                         except Exception:
-                            logger.debug("Error while attempting to close a client", exc_info=True)
+                            logger.debug("Error while attempting to close a transient client", exc_info=True)
             except Exception:
-                logger.debug("Error in final cleanup of clients", exc_info=True)
+                logger.debug("Error in final cleanup of transient clients", exc_info=True)
 
     def update_processing_progress(self, upload_id, step, message, progress=None, details=None, increments=None):
         """Update processing progress with detailed information"""
@@ -702,7 +703,11 @@ class SimpleDocumentUploadHandler:
                                 'otq': 'otq',
                                 'only_three_questions': 'otq',
                                 'client_reviews': 'client_reviews',
-                                'review': 'client_reviews'
+                                'review': 'client_reviews',
+                                'book': 'book',
+                                'nyp': 'Nyp, Nl',
+                                'nl': 'Nyp, Nl',
+                                'cr': 'cr'
                             }
                             
                             normalized_type = value_str.lower().strip()
@@ -855,7 +860,7 @@ class SimpleDocumentUploadHandler:
                 'quarterly_report', 'newsletter', 'articles', 'annual_report',
                 'financial_statement', 'presentation', 'whitepaper', 'research_report',
                 'policy_document', 'manual', 'guide', 'client_reviews', 'nyp_columns',
-                'otq', 'other'
+                'otq', 'other', 'book', 'Nyp, Nl', 'cr'
             ]
             
             # Combine and deduplicate
@@ -875,9 +880,9 @@ class SimpleDocumentUploadHandler:
                 'policy_document': 'Policy Document',
                 'manual': 'Manual',
                 'guide': 'Guide',
-                'client_reviews': 'Client Reviews',
-                'nyp_columns': 'NYP Columns',
-                'otq': 'Only Three Questions',
+                'cr': 'Client Reviews',
+                'Nyp, Nl': 'NYP Columns',
+                'book': 'Only Three Questions',
                 'other': 'Other'
             }
             

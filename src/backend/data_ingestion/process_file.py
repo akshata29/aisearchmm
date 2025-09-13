@@ -159,7 +159,7 @@ class ProcessFile:
                 "quarterly_report", "newsletter", "articles", "annual_report", 
                 "financial_statement", "presentation", "whitepaper", "research_report", 
                 "policy_document", "manual", "guide", "client_reviews", "nyp_columns", 
-                "otq", "other"
+                "otq", "other", "book", "Nyp, Nl", "cr"
             }
             
             # Use the extracted/provided type as-is, but log if it's unknown
@@ -259,7 +259,11 @@ class ProcessFile:
                                 'otq': 'otq',
                                 'only_three_questions': 'otq',
                                 'client_reviews': 'client_reviews',
-                                'review': 'client_reviews'
+                                'review': 'client_reviews',
+                                'book': 'book',
+                                'nyp': 'Nyp, Nl',
+                                'nl': 'Nyp, Nl',
+                                'cr': 'cr'
                             }
                             
                             normalized_type = value_str.lower().strip()
