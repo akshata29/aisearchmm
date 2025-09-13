@@ -277,6 +277,8 @@ class SimpleDocumentUploadHandler:
         """Handle document processing with enhanced logging and monitoring"""
         process_start = time.time()
         upload_id = None
+        # Track clients that are created for this request and must be closed explicitly
+        transient_clients = []
         
         try:
             data = await request.json()
@@ -317,16 +319,21 @@ class SimpleDocumentUploadHandler:
                 if not self.clients:
                     await self.initialize_clients()
                 bundle_clients = self.clients
+                transient_clients = []
             else:
                 config = get_config()
                 # map bundle to same keys used in self.clients
+                # The SearchClient returned by bundle.get_search_client is request-scoped and should be closed
+                search_client = bundle.get_search_client(config.search_service.index_name)
+                transient_clients = [search_client]
+
                 bundle_clients = {
                     'document': bundle.document_intelligence_client,
                     'text_embedding': type('AOAIWrapper', (), {'embed': lambda self, input: bundle.openai_client.embeddings.create(input=input, model=config.azure_openai.embedding_deployment)})(),
                     'image_embedding': type('AOAIWrapper', (), {'embed': lambda self, input: bundle.openai_client.embeddings.create(input=input, model=config.azure_openai.embedding_deployment)})(),
                     'openai': bundle.openai_client,
                     'instructor_openai': instructor.from_openai(bundle.openai_client),
-                    'search': bundle.get_search_client(config.search_service.index_name),
+                    'search': search_client,
                     'search_index': bundle.search_index_client,
                     'blob_service': bundle.blob_service_client,
                     'blob_container': bundle.blob_service_client.get_container_client(config.storage.artifacts_container)
@@ -521,6 +528,41 @@ class SimpleDocumentUploadHandler:
                 "timestamp": datetime.datetime.now().isoformat()
             })
             print(f"Document processing error for {upload_id}: {e}")
+        finally:
+            # Close any clients in bundle_clients that are not the handler-level cached clients
+            try:
+                if bundle_clients:
+                    for key, client_obj in list(bundle_clients.items()):
+                        try:
+                            # Skip if this client is the same object as the handler-level cached client
+                            if getattr(self, 'clients', None) and self.clients.get(key) is client_obj:
+                                continue
+
+                            if client_obj is None:
+                                continue
+
+                            # Prefer async close
+                            if hasattr(client_obj, 'aclose') and callable(getattr(client_obj, 'aclose')):
+                                try:
+                                    await client_obj.aclose()
+                                    logger.debug("Closed transient async client", extra={"client_key": key})
+                                except Exception:
+                                    logger.debug("Error closing client aclose()", extra={"client_key": key}, exc_info=True)
+                            elif hasattr(client_obj, 'close') and callable(getattr(client_obj, 'close')):
+                                try:
+                                    result = client_obj.close()
+                                    import asyncio as _asyncio
+                                    if _asyncio.iscoroutine(result):
+                                        await result
+                                        logger.debug("Awaited async close() on client", extra={"client_key": key})
+                                    else:
+                                        logger.debug("Called sync close() on client", extra={"client_key": key})
+                                except Exception:
+                                    logger.debug("Error calling client's close()", extra={"client_key": key}, exc_info=True)
+                        except Exception:
+                            logger.debug("Error while attempting to close a client", exc_info=True)
+            except Exception:
+                logger.debug("Error in final cleanup of clients", exc_info=True)
 
     def update_processing_progress(self, upload_id, step, message, progress=None, details=None, increments=None):
         """Update processing progress with detailed information"""

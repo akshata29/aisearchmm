@@ -223,17 +223,18 @@ class SecurityMiddleware:
     def _add_security_headers(self, response: web.Response) -> None:
         """Add comprehensive security headers to response."""
         # Comprehensive CSP policy that allows necessary resources while maintaining security
+        # Updated CSP: allow trusted CDNs (e.g. Monaco loader on cdn.jsdelivr.net) while keeping strict defaults.
         csp_policy = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "  # Allow inline scripts and eval for React/Vite
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; "  # Allow Monaco loader from CDNs
             "style-src 'self' 'unsafe-inline' data:; "  # Allow inline styles and data URLs for fonts
             "img-src 'self' *.blob.core.windows.net *.azureedge.net data: blob: https:; "  # Allow Azure storage and common image sources
             "font-src 'self' data: https: *.gstatic.com *.googleapis.com; "  # Allow web fonts
-            "connect-src 'self' *.blob.core.windows.net *.azure.com *.azureedge.net *.openai.azure.com wss: ws:; "  # Allow API connections
+            "connect-src 'self' https://cdn.jsdelivr.net *.blob.core.windows.net *.azure.com *.azureedge.net *.openai.azure.com wss: ws: https:; "  # Allow API connections and CDN module loads
             "media-src 'self' *.blob.core.windows.net data: blob:; "  # Allow media files from storage
             "object-src 'none'; "  # Block plugins for security
             "frame-src 'self'; "  # Allow same-origin frames
-            "worker-src 'self' blob:; "  # Allow web workers
+            "worker-src 'self' blob: https://cdn.jsdelivr.net; "  # Allow web workers and worker scripts from CDN
             "child-src 'self' blob:; "  # Allow child contexts
             "manifest-src 'self'; "  # Allow web app manifest
             "form-action 'self'; "  # Restrict form submissions

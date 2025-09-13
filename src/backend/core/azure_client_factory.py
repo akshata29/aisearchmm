@@ -66,6 +66,18 @@ class SessionClients:
                 await self.document_intelligence_client.close()
             except Exception:
                 logger.debug("Error closing document_intelligence_client", exc_info=True)
+        # Try to close openai client if it exposes an async close or close method
+        try:
+            if hasattr(self.openai_client, 'aclose'):
+                await getattr(self.openai_client, 'aclose')()
+            elif hasattr(self.openai_client, 'close'):
+                # some clients may expose sync close
+                try:
+                    getattr(self.openai_client, 'close')()
+                except Exception:
+                    logger.debug("Error calling openai_client.close()", exc_info=True)
+        except Exception:
+            logger.debug("Error closing openai client", exc_info=True)
 
 
 class ClientFactory:
@@ -142,6 +154,13 @@ class ClientFactory:
                 logger.info("DefaultAzureCredential acquired storage token", extra={"session_id": session_id, "expires_on": getattr(token, 'expires_on', None)})
             except Exception as e:
                 logger.error("DefaultAzureCredential failed to acquire storage token", extra={"session_id": session_id, "error": str(e)} , exc_info=True)
+
+            # Diagnostic: attempt to acquire a token for Azure Cognitive Search to detect missing data-plane permissions
+            try:
+                search_token = await credential.get_token("https://search.azure.com/.default")
+                logger.info("Acquired token for Azure Cognitive Search", extra={"session_id": session_id, "search_token_exp": getattr(search_token, 'expires_on', None)})
+            except Exception as e:
+                logger.warning("Could not acquire token for Azure Cognitive Search. This may indicate missing AAD scopes or permissions.", extra={"session_id": session_id, "error": str(e)})
 
             # OpenAI bearer token provider
             token_provider = get_bearer_token_provider(
@@ -240,6 +259,11 @@ class ClientFactory:
             credential=search_cred,
             **client_kwargs,
         )
+
+        try:
+            logger.debug("SearchIndexClient created", extra={"endpoint": config.search_service.endpoint, "credential_type": type(search_cred).__name__})
+        except Exception:
+            logger.debug("Could not log search index client creation", exc_info=True)
 
         def get_search_client(index_name: str) -> SearchClient:
             return SearchClient(

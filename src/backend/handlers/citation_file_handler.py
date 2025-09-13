@@ -4,6 +4,7 @@ import time
 from typing import Dict, Any
 from aiohttp import web
 from azure.storage.blob.aio import ContainerClient, BlobServiceClient
+from azure.identity.aio import DefaultAzureCredential
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from azure.core.exceptions import AzureError, ResourceNotFoundError
 
@@ -333,17 +334,61 @@ class CitationFilesHandler:
                     except Exception:
                         logger.debug("Credential diagnostic check failed", extra={"request_id": request_id}, exc_info=True)
 
-                    user_delegation_key = await blob_service_client.get_user_delegation_key(
-                        key_start_time=start_time, key_expiry_time=expiry_time
-                    )
-                    sas_token = generate_blob_sas(
-                        account_name=blob_client.account_name or "",
-                        container_name=container_client.container_name,
-                        blob_name=normalized_blob_name,
-                        user_delegation_key=user_delegation_key,
-                        permission=BlobSasPermissions(read=True),
-                        expiry=datetime.utcnow() + timedelta(minutes=self.sas_duration_minutes),
-                    )
+                    # If the existing blob_service_client is not AAD/Bearer-capable (for example,
+                    # constructed with an account key), the Storage service will reject a
+                    # get_user_delegation_key call. In that case, create a temporary
+                    # AAD-backed BlobServiceClient using DefaultAzureCredential to request
+                    # the user delegation key. This is deliberate and only used when
+                    # auth_mode == MANAGED_IDENTITY and the provided client cannot issue
+                    # a Bearer token. We log the behavior so it is visible in production.
+                    temp_cred = None
+                    temp_blob_service_client = None
+                    try:
+                        cred = getattr(blob_service_client, 'credential', None)
+                        needs_temp_aad = not (cred is not None and hasattr(cred, 'get_token'))
+
+                        if needs_temp_aad:
+                            logger.info(
+                                "BlobServiceClient not AAD-capable; creating temporary AAD-backed client for user-delegation key",
+                                extra={"request_id": request_id, "blob_account": blob_client.account_name}
+                            )
+                            temp_cred = DefaultAzureCredential()
+                            # Use the same account URL as the provided service client
+                            account_url = getattr(blob_service_client, 'url', None)
+                            if not account_url:
+                                # Fallback to constructing from account name
+                                account_name = getattr(blob_client, 'account_name', None) or getattr(blob_service_client, 'account_name', None)
+                                account_url = f"https://{account_name}.blob.core.windows.net"
+
+                            temp_blob_service_client = BlobServiceClient(account_url=account_url, credential=temp_cred)
+                            user_delegation_key = await temp_blob_service_client.get_user_delegation_key(
+                                key_start_time=start_time, key_expiry_time=expiry_time
+                            )
+                        else:
+                            user_delegation_key = await blob_service_client.get_user_delegation_key(
+                                key_start_time=start_time, key_expiry_time=expiry_time
+                            )
+
+                        sas_token = generate_blob_sas(
+                            account_name=blob_client.account_name or "",
+                            container_name=container_client.container_name,
+                            blob_name=normalized_blob_name,
+                            user_delegation_key=user_delegation_key,
+                            permission=BlobSasPermissions(read=True),
+                            expiry=datetime.utcnow() + timedelta(minutes=self.sas_duration_minutes),
+                        )
+                    finally:
+                        # Close temporary clients/credentials if created to avoid leaks
+                        if temp_blob_service_client is not None:
+                            try:
+                                await temp_blob_service_client.close()
+                            except Exception:
+                                logger.debug("Failed closing temporary BlobServiceClient", extra={"request_id": request_id}, exc_info=True)
+                        if temp_cred is not None:
+                            try:
+                                await temp_cred.close()
+                            except Exception:
+                                logger.debug("Failed closing temporary DefaultAzureCredential", extra={"request_id": request_id}, exc_info=True)
                 except Exception as ade:
                     logger.error("Managed Identity auth selected but user-delegation key request failed", extra={"request_id": request_id, "error": str(ade)})
                     # Surface error to caller (no silent fallback allowed)

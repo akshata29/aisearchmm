@@ -363,8 +363,8 @@ Example role assignment commands (PowerShell friendly). Replace placeholders wit
 #$searchId  = "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Search/searchServices/<search-name>"
 #$openaiId  = "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<openai-name>"
 
-az role assignment create --assignee-object-id $objectId --role "Storage Blob Data Reader" --scope $storageId
-az role assignment create --assignee-object-id $objectId --role "Search Index Data Reader" --scope $searchId
+az role assignment create --assignee-object-id $objectId --role "Storage Blob Data Contributor" --scope $storageId
+az role assignment create --assignee-object-id $objectId --role "Search Index Data Contributor" --scope $searchId
 az role assignment create --assignee-object-id $objectId --role "Cognitive Services OpenAI Contributor" --scope $openaiId
 ```
 

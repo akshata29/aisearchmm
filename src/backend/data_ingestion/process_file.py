@@ -1393,8 +1393,36 @@ Provide only the description without any preamble or explanation."""
                 return
 
             try:
+                # Log diagnostic info about the search client and credential
+                try:
+                    cred = getattr(self.search_client, '_credential', None)
+                    cred_type = type(cred).__name__ if cred is not None else 'None'
+                except Exception:
+                    cred_type = 'unknown'
+                try:
+                    endpoint = getattr(self.search_client, 'endpoint', None) or getattr(self.search_client, '_endpoint', None)
+                except Exception:
+                    endpoint = None
+                logger.info("Uploading documents to search index", extra={"index": index_name, "document_count": len(documents), "search_credential_type": cred_type, "endpoint": endpoint})
+
                 await self.search_client.upload_documents(documents=documents)
                 print(f"Indexed {len(documents)} documents.")
+            except HttpResponseError as e:
+                # Detailed logging for HTTP errors from the search service
+                status = getattr(e, 'status_code', None) or getattr(e, 'status', None)
+                message = str(e)
+                logger.error("Search service returned HTTP error during upload", extra={"index": index_name, "status": status, "error": message})
+                # If index missing, attempt recreate and retry
+                missing = isinstance(e, ResourceNotFoundError) or (hasattr(e, 'message') and 'not found' in str(e).lower())
+                if missing:
+                    desired = await self._build_index_schema(index_name)
+                    await self._ensure_index_exists(index_name, desired)
+                    await self.search_client.upload_documents(documents=documents)
+                    print(f"Indexed {len(documents)} documents after recreating index.")
+                else:
+                    # Surface forbidden and other errors with more detail
+                    print(f"Error indexing documents (http): status={status} message={message}")
+                    raise
             except Exception as e:
                 # Retry once if index missing
                 missing = isinstance(e, ResourceNotFoundError) or (hasattr(e, 'message') and 'not found' in str(e).lower())
