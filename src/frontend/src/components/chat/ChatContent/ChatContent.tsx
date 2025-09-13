@@ -166,13 +166,13 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
 
     // Helper function to find processing steps for a message, even if request IDs don't match exactly
     const findProcessingStepsForMessage = (message: any): ProcessingStepsMessage[] | null => {
-        console.log("DEBUG: Looking for processing steps for message:", message.request_id);
-        console.log("DEBUG: Available processing step keys:", Object.keys(processingStepMsg));
+        //console.log("DEBUG: Looking for processing steps for message:", message.request_id);
+        //console.log("DEBUG: Available processing step keys:", Object.keys(processingStepMsg));
         
         // First try exact match
         const messageSteps = processingStepMsg?.[message.request_id];
         if (messageSteps && messageSteps.length > 0) {
-            console.log("DEBUG: Found exact match for", message.request_id);
+            //console.log("DEBUG: Found exact match for", message.request_id);
             return messageSteps;
         }
         
@@ -186,9 +186,9 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                     if (!isNaN(stepTimestamp)) {
                         // If timestamps are within 30 seconds, consider it a match
                         const timeDiff = Math.abs(messageTimestamp - stepTimestamp);
-                        console.log(`DEBUG: Comparing ${messageTimestamp} vs ${stepTimestamp}, diff: ${timeDiff}`);
+                        //console.log(`DEBUG: Comparing ${messageTimestamp} vs ${stepTimestamp}, diff: ${timeDiff}`);
                         if (timeDiff < 30000) {
-                            console.log("DEBUG: Found close timestamp match");
+                            //console.log("DEBUG: Found close timestamp match");
                             return steps;
                         }
                     }
@@ -202,12 +202,12 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
         if (allStepKeys.length > 0) {
             const latestStepKey = allStepKeys[allStepKeys.length - 1];
             if (latestStepKey && processingStepMsg[latestStepKey] && processingStepMsg[latestStepKey]?.length > 0) {
-                console.log("DEBUG: Using latest processing steps as fallback");
+                //console.log("DEBUG: Using latest processing steps as fallback");
                 return processingStepMsg[latestStepKey] || null;
             }
         }
-        
-        console.log("DEBUG: No processing steps found");
+
+        //console.log("DEBUG: No processing steps found");
         return null;
     };
 

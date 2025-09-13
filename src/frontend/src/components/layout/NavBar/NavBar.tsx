@@ -14,10 +14,14 @@ interface Props {
     chats: Chat[];
     onNewChat: () => void;
     setConfig: Dispatch<SetStateAction<SearchConfig>>;
+    isAdmin?: boolean;
 }
 
-export const NavBar = ({ setConfig, onNewChat, config }: Props) => {
-    const [isOpen, setIsOpen] = useState(true);
+export const NavBar = ({ setConfig, onNewChat, config, isAdmin: propIsAdmin }: Props) => {
+    const injected = Boolean(window.__RUNTIME_CONFIG__?.['IS_ADMIN'] === true || window.__RUNTIME_CONFIG__?.['IS_ADMIN'] === 'true');
+    const isAdmin = typeof propIsAdmin === 'boolean' ? propIsAdmin : injected;
+    // For admin sessions, keep settings expanded by default. Non-admins start collapsed.
+    const [isOpen, setIsOpen] = useState(Boolean(isAdmin));
 
     const getToolTipContent = () => {
         return isOpen ? "Close Settings" : "Open Settings";

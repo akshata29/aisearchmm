@@ -67,6 +67,9 @@ export default defineConfig({
             "/api/delete_index": {
                 target: "http://localhost:5000"
             },
+            "/api": {
+                target: "http://localhost:5000"
+            },
             "/api/auth": {
                 target: "http://localhost:5000"
             },

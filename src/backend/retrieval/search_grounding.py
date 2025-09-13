@@ -8,6 +8,7 @@ from utils.prompts import SEARCH_QUERY_SYSTEM_PROMPT
 from core.models import Message, SearchConfig, GroundingResults
 from azure.search.documents.aio import SearchClient
 from retrieval.grounding_retriever import GroundingRetriever
+from core.azure_client_factory import AuthMode
 
 logger = logging.getLogger("groundingapi")
 
@@ -23,6 +24,7 @@ class SearchGroundingRetriever(GroundingRetriever):
         blob_service_client=None,
         container_client=None,
         artifacts_container_client=None,
+        auth_mode: Optional[AuthMode] = None,
     ):
         self.search_client = search_client
         self.openai_client = openai_client
@@ -31,6 +33,14 @@ class SearchGroundingRetriever(GroundingRetriever):
         self._blob_service_client = blob_service_client
         self._container_client = container_client
         self._artifacts_container_client = artifacts_container_client
+        # Store explicit auth_mode if provided by app wiring; may also be set later by caller
+        self.auth_mode = auth_mode
+
+        # Log initialization and explicit auth_mode (None means it wasn't provided at construction)
+        try:
+            logger.info("SearchGroundingRetriever initialized", extra={"auth_mode": getattr(self.auth_mode, 'value', None)})
+        except Exception:
+            logger.debug("Could not log auth_mode for SearchGroundingRetriever", exc_info=True)
         
 
 
@@ -343,7 +353,7 @@ For hybrid search scenarios, focus on:
                         try:
                             content_path = ref.get("content_path") or ref.get("content")
                             if content_path:
-                                image_url = await citation_handler._get_file_url(content_path)
+                                image_url = await citation_handler._get_file_url(content_path, auth_mode=getattr(self, 'auth_mode', None))
                                 citation["image_url"] = image_url
                                 citation["is_image"] = True
                         except Exception as e:
@@ -479,7 +489,7 @@ For hybrid search scenarios, focus on:
             raise Exception("Blob service client or artifacts container client not available for image URL generation")
         
         citation_handler = CitationFilesHandler(blob_service_client, container_client, artifacts_container_client)
-        return await citation_handler._get_file_url(blob_path)
+        return await citation_handler._get_file_url(blob_path, auth_mode=getattr(self, 'auth_mode', None))
 
     async def _fetch_document_metadata(self, doc_id: str, reference: dict) -> dict:
         """Safely fetch document metadata with fallbacks, including linked image information."""

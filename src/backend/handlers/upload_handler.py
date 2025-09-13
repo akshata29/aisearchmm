@@ -23,7 +23,9 @@ from openai import AsyncAzureOpenAI
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.indexes.aio import SearchIndexClient, SearchIndexerClient
 from azure.storage.blob.aio import BlobServiceClient
-from azure.identity.aio import DefaultAzureCredential
+
+from core.azure_client_factory import ClientFactory, AuthMode
+from core.config import get_config
 import instructor
 
 from constants import USER_AGENT
@@ -79,146 +81,73 @@ class SimpleDocumentUploadHandler:
         """Initialize all Azure clients needed for document processing"""
         logger.info("Initializing Azure clients")
         start_time = time.time()
-        
-        if self.credential is None:
-            self.credential = DefaultAzureCredential()
+        # Use app config and factory to initialize a session bundle. Session id is per-request
+        config = get_config()
 
-        # Initialize Document Intelligence client with key
-        document_key = os.environ.get("DOCUMENTINTELLIGENCE_KEY")
-        doc_endpoint = os.environ.get("DOCUMENTINTELLIGENCE_ENDPOINT")
-        
-        if not doc_endpoint:
-            logger.error("DOCUMENTINTELLIGENCE_ENDPOINT environment variable is required")
-            raise ValueError("DOCUMENTINTELLIGENCE_ENDPOINT environment variable is required")
-            
-        if document_key:
-            self.clients['document'] = DocumentIntelligenceClient(
-                endpoint=doc_endpoint,
-                credential=AzureKeyCredential(document_key),
-            )
-            logger.info("Document Intelligence client initialized with API key")
+        # Detect auth mode from configured keys to avoid adding new env vars
+        if config.azure_openai.api_key or config.search_service.api_key or config.document_intelligence.key:
+            auth_mode = AuthMode.API_KEY
         else:
-            self.clients['document'] = DocumentIntelligenceClient(
-                endpoint=doc_endpoint,
-                credential=self.credential,
-            )
-            logger.info("Document Intelligence client initialized with managed identity")
+            auth_mode = AuthMode.MANAGED_IDENTITY
 
-        # Initialize embedding clients - use Azure OpenAI instead of Azure AI Inference
-        # since AI Inference endpoint may not have embedding models available
-        from openai import AsyncAzureOpenAI
-        
-        # Create a simple wrapper for Azure OpenAI embeddings to match the interface
+        # Use a fixed session id for the upload handler
+        session_id = "upload_handler"
+        bundle = await ClientFactory.get_session_clients(session_id, auth_mode)
+
+        # Log which auth mode the upload handler is using
+        try:
+            logger.info("Upload handler using auth mode", extra={"auth_mode": auth_mode.value, "session_id": session_id})
+        except Exception:
+            logger.debug("Could not log auth_mode for upload handler", exc_info=True)
+
+        # Wire up the clients used by this handler
+        # Embedding clients: reuse Azure OpenAI for embeddings (wrap to previous interface)
         class AzureOpenAIEmbeddingClient:
             def __init__(self, client, deployment):
                 self.client = client
                 self.deployment = deployment
-                
+
             async def embed(self, input, model=None):
-                # Convert single string to list if needed
                 if isinstance(input, str):
                     input = [input]
-                
-                response = await self.client.embeddings.create(
-                    input=input,
-                    model=self.deployment
-                )
+                response = await self.client.embeddings.create(input=input, model=self.deployment)
                 return response
-        
-        # Initialize Azure OpenAI client for embeddings with graceful fallback
-        openai_embedding_client = AsyncAzureOpenAI(
-            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-            api_key=os.environ["AZURE_OPENAI_API_KEY"],
-            api_version="2024-08-01-preview",
-        )
 
-        deployment_name = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+        deployment_name = config.azure_openai.embedding_deployment
+        text_embed_client = AzureOpenAIEmbeddingClient(bundle.openai_client, deployment_name)
+        image_embed_client = text_embed_client
 
-        async def get_embedding_clients():
-            try:
-                aoai_client = AzureOpenAIEmbeddingClient(openai_embedding_client, deployment_name)
-                return aoai_client, aoai_client
-            except Exception as e:
-                # Fallback to Azure AI Inference when AOAI deployment is missing
-                if "DeploymentNotFound" in str(e) or "404" in str(e):
-                    from azure.ai.inference.aio import EmbeddingsClient as InferenceEmbeddingsClient
-                    inf_endpoint = os.environ.get("AZURE_INFERENCE_EMBED_ENDPOINT")
-                    inf_key = os.environ.get("AZURE_INFERENCE_API_KEY")
-                    inf_model = os.environ.get("AZURE_INFERENCE_EMBED_MODEL_NAME")
-                    if inf_endpoint and inf_model and inf_key:
-                        # Wrap Inference client to match .embed(input=..)
-                        class InferenceWrapper:
-                            def __init__(self, client, model):
-                                self.client = client
-                                self.model = model
-                            async def embed(self, input, model=None):
-                                if isinstance(input, str):
-                                    input = [input]
-                                resp = await self.client.embed(input=input, model=self.model)
-                                return resp
-                        inf_client = InferenceEmbeddingsClient(
-                            endpoint=inf_endpoint,
-                            credential=AzureKeyCredential(inf_key),
-                        )
-                        wrap = InferenceWrapper(inf_client, inf_model)
-                        return wrap, wrap
-                # Surface the AOAI error if no fallback is possible
-                raise
-
-        text_embed_client, image_embed_client = await get_embedding_clients()
         self.clients['text_embedding'] = text_embed_client
         self.clients['image_embedding'] = image_embed_client
 
-        # Initialize OpenAI client with API key
-        openai_client = AsyncAzureOpenAI(
-            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-            api_key=os.environ["AZURE_OPENAI_API_KEY"],
-            api_version="2024-08-01-preview",
-        )
-        # Store both regular and instructor clients
-        self.clients['openai'] = openai_client
-        self.clients['instructor_openai'] = instructor.from_openai(openai_client)
+        # OpenAI client and instructor
+        self.clients['openai'] = bundle.openai_client
+        self.clients['instructor_openai'] = instructor.from_openai(bundle.openai_client)
 
-        # Initialize Search clients with API key
-        search_key = os.environ.get("SEARCH_API_KEY")
-        if search_key:
-            search_credential = AzureKeyCredential(search_key)
-        else:
-            search_credential = self.credential
-
-        self.clients['search'] = SearchClient(
-            endpoint=os.environ["SEARCH_SERVICE_ENDPOINT"],
-            index_name=os.environ["SEARCH_INDEX_NAME"],
-            credential=search_credential,
-            user_agent_policy=UserAgentPolicy(base_user_agent=USER_AGENT),
-        )
-
-        self.clients['search_index'] = SearchIndexClient(
-            endpoint=os.environ["SEARCH_SERVICE_ENDPOINT"],
-            credential=search_credential,
-            user_agent_policy=UserAgentPolicy(base_user_agent=USER_AGENT),
-        )
-
+        # Search clients
+        self.clients['search'] = bundle.get_search_client(config.search_service.index_name)
+        self.clients['search_index'] = bundle.search_index_client
+        # Keep existing search_indexer usage: create with same credential as index client
         self.clients['search_indexer'] = SearchIndexerClient(
-            endpoint=os.environ["SEARCH_SERVICE_ENDPOINT"],
-            credential=search_credential,
+            endpoint=config.search_service.endpoint,
+            credential=(AzureKeyCredential(config.search_service.api_key) if config.search_service.api_key else bundle.credential),
             user_agent_policy=UserAgentPolicy(base_user_agent=USER_AGENT),
         )
 
-        # Initialize Blob Storage client
-        self.clients['blob_service'] = BlobServiceClient(
-            account_url=os.environ["ARTIFACTS_STORAGE_ACCOUNT_URL"],
-            #credential=self.credential,
-            credential=os.environ["ARTIFACTS_STORAGE_ACCOUNT_KEY"],
-        )
-        self.clients['blob_container'] = self.clients['blob_service'].get_container_client(
-            os.environ["ARTIFACTS_STORAGE_CONTAINER"]
-        )
+        # Blob and container
+        self.clients['blob_service'] = bundle.blob_service_client
+        self.clients['blob_container'] = bundle.blob_service_client.get_container_client(config.storage.artifacts_container)
+        # Log auth mode used for these clients
+        try:
+            logger.info("Upload handler clients initialized", extra={"auth_mode": getattr(bundle, 'auth_mode', None).value if getattr(bundle, 'auth_mode', None) else None})
+        except Exception:
+            logger.debug("Could not log auth_mode in upload handler", exc_info=True)
         
         duration = time.time() - start_time
         logger.info("All Azure clients initialized successfully", extra={
             "initialization_time_seconds": round(duration, 3),
-            "clients_count": len(self.clients)
+            "clients_count": len(self.clients),
+            "auth_mode": auth_mode.value,
         })
 
     async def handle_upload(self, request):
@@ -381,9 +310,27 @@ class SimpleDocumentUploadHandler:
                     "error": "Invalid upload ID"
                 }, status=400)
 
-            # Initialize clients if not done
-            if not self.clients:
-                await self.initialize_clients()
+            # Prefer request-scoped session bundle if present
+            bundle = request.get("session_bundle")
+            if bundle is None:
+                # Fall back to handler-level clients initialization
+                if not self.clients:
+                    await self.initialize_clients()
+                bundle_clients = self.clients
+            else:
+                config = get_config()
+                # map bundle to same keys used in self.clients
+                bundle_clients = {
+                    'document': bundle.document_intelligence_client,
+                    'text_embedding': type('AOAIWrapper', (), {'embed': lambda self, input: bundle.openai_client.embeddings.create(input=input, model=config.azure_openai.embedding_deployment)})(),
+                    'image_embedding': type('AOAIWrapper', (), {'embed': lambda self, input: bundle.openai_client.embeddings.create(input=input, model=config.azure_openai.embedding_deployment)})(),
+                    'openai': bundle.openai_client,
+                    'instructor_openai': instructor.from_openai(bundle.openai_client),
+                    'search': bundle.get_search_client(config.search_service.index_name),
+                    'search_index': bundle.search_index_client,
+                    'blob_service': bundle.blob_service_client,
+                    'blob_container': bundle.blob_service_client.get_container_client(config.storage.artifacts_container)
+                }
 
             file_info = self.processing_status[upload_id]
             file_path = file_info.get('file_path')
@@ -416,7 +363,7 @@ class SimpleDocumentUploadHandler:
 
             # Start processing in background with proper task management
             loop = asyncio.get_running_loop()
-            task = loop.create_task(self._process_document_async(upload_id, file_path, filename))
+            task = loop.create_task(self._process_document_async(upload_id, file_path, filename, bundle_clients))
             
             # Store the task to prevent it from being garbage collected
             if not hasattr(self, '_background_tasks'):
@@ -447,7 +394,7 @@ class SimpleDocumentUploadHandler:
         
         return web.json_response(self.processing_status[upload_id])
 
-    async def _process_document_async(self, upload_id, file_path, filename):
+    async def _process_document_async(self, upload_id, file_path, filename, bundle_clients):
         """Process document asynchronously with detailed progress tracking"""
         try:
             # Initialize detailed tracking
@@ -482,13 +429,13 @@ class SimpleDocumentUploadHandler:
                     pass
 
             processor = ProcessFile(
-                document_client=self.clients['document'],
-                text_model=self.clients['text_embedding'],
-                image_model=self.clients['image_embedding'],
-                search_client=self.clients['search'],
-                index_client=self.clients['search_index'],
-                instructor_openai_client=self.clients['openai'],  # Use regular OpenAI client for image descriptions
-                blob_service_client=self.clients['blob_service'],
+                document_client=bundle_clients['document'],
+                text_model=bundle_clients['text_embedding'],
+                image_model=bundle_clients['image_embedding'],
+                search_client=bundle_clients['search'],
+                index_client=bundle_clients['search_index'],
+                instructor_openai_client=bundle_clients['openai'],  # Use regular OpenAI client for image descriptions
+                blob_service_client=bundle_clients['blob_service'],
                 chatcompletions_model_name=os.environ["AZURE_OPENAI_DEPLOYMENT"],
                 progress_callback=progress_cb,
             )

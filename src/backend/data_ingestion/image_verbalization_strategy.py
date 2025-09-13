@@ -155,6 +155,16 @@ class IndexerImgVerbalizationStrategy(Strategy):
         container_client = request.blobServiceClient.get_container_client(
             request.blobSource
         )
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            inferred_mode = None
+            cred = getattr(request.blobServiceClient, 'credential', None)
+            if cred is not None:
+                inferred_mode = 'api_key' if isinstance(cred, str) else 'managed_identity'
+            logger.info("IndexerImgVerbalizationStrategy using blob client", extra={"container": request.blobSource, "auth_mode": inferred_mode})
+        except Exception:
+            logger.debug("Could not log auth mode for image verbalization strategy", exc_info=True)
         try:
             await container_client.create_container()
         except Exception as e:

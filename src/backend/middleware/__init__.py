@@ -11,6 +11,8 @@ from aiohttp import web, hdrs
 from core.exceptions import ApplicationError, ValidationError, ErrorCategory
 from core.config import SecurityConfig
 from utils.logging_config import StructuredLogger, set_request_id, clear_request_id, get_request_id
+from core.azure_client_factory import ClientFactory, AuthMode
+from core.config import get_config
 
 
 class RequestLoggingMiddleware:
@@ -334,6 +336,73 @@ class RequestValidationMiddleware:
         return await handler(request)
 
 
+class SessionResolverMiddleware:
+    """Resolve a per-request session bundle (session_id + auth_mode) and attach it to the request.
+
+    Headers supported:
+    - X-Session-Id: arbitrary session identifier
+    - X-Use-Managed-Identity: 'true'|'false' to choose auth mode for the session bundle
+    Fallback: use config to auto-detect auth mode if header not present.
+    """
+
+    def __init__(self):
+        self.logger = StructuredLogger("session_resolver")
+        self.config = get_config()
+
+    @web.middleware
+    async def __call__(self, request: web.Request, handler: Callable) -> web.Response:
+        # Read session id from header or cookie; default to request id
+        session_id = request.headers.get("X-Session-Id") or request.cookies.get("session_id") or request.get("request_id") or "default"
+        header_mi = request.headers.get("X-Use-Managed-Identity")
+        # Log raw header value for debugging
+        self.logger.debug("SessionResolver: raw X-Use-Managed-Identity header", extra={"raw_header": header_mi, "session_id": session_id})
+
+        if header_mi is not None:
+            use_mi = header_mi.lower() == "true"
+            auth_mode = AuthMode.MANAGED_IDENTITY if use_mi else AuthMode.API_KEY
+            self.logger.info("SessionResolver: header specified auth mode", extra={"session_id": session_id, "header_value": header_mi, "auth_mode": auth_mode.value})
+        else:
+            # Auto-detect from existing configured keys
+            has_api_keys = bool(self.config.azure_openai.api_key or self.config.search_service.api_key or self.config.document_intelligence.key)
+            auth_mode = AuthMode.API_KEY if has_api_keys else AuthMode.MANAGED_IDENTITY
+            self.logger.info("SessionResolver: header missing, auto-detected auth mode", extra={"session_id": session_id, "has_api_keys": has_api_keys, "auth_mode": auth_mode.value})
+
+        # If there's a cached session bundle for the other auth mode, clear it so toggling auth mode takes effect
+        try:
+            other_mode = AuthMode.MANAGED_IDENTITY if auth_mode == AuthMode.API_KEY else AuthMode.API_KEY
+            await ClientFactory.clear_session(session_id, other_mode)
+            self.logger.debug("SessionResolver: cleared cached bundle for other auth mode", extra={"session_id": session_id, "cleared_mode": other_mode.value})
+        except Exception:
+            # ignore errors while clearing; not critical
+            self.logger.debug("SessionResolver: error clearing other-mode bundle (ignored)", extra={"session_id": session_id}, exc_info=True)
+
+        # Obtain or create session bundle
+        try:
+            bundle = await ClientFactory.get_session_clients(session_id, auth_mode)
+            request["session_bundle"] = bundle
+            request["session_id"] = session_id
+            request["auth_mode"] = auth_mode
+            self.logger.info("Attached session bundle to request", extra={"session_id": session_id, "auth_mode": auth_mode.value})
+        except Exception as e:
+            self.logger.error("Failed to create session bundle", extra={"error": str(e), "session_id": session_id}, exc_info=True)
+            # proceed without bundle but handler should validate presence when required
+
+        # Call the next handler and attach debug response headers for verification
+        response = await handler(request)
+
+        try:
+            # Attach the resolved auth mode and session id to the response so clients can verify
+            if response is not None and hasattr(response, 'headers'):
+                response.headers['X-Session-Auth-Mode'] = auth_mode.value
+                response.headers['X-Session-Id'] = session_id
+                self.logger.debug("Added debug response headers for auth mode", extra={"session_id": session_id, "auth_mode": auth_mode.value, "status": getattr(response, 'status', None)})
+        except Exception:
+            # Don't let header attaching break response path
+            self.logger.debug("Failed to attach debug response headers", extra={"session_id": session_id}, exc_info=True)
+
+        return response
+
+
 def create_middleware_stack(
     security_config: SecurityConfig,
     enable_request_logging: bool = True,
@@ -349,6 +418,9 @@ def create_middleware_stack(
         middleware_stack.append(
             RequestLoggingMiddleware(enable_request_logging, enable_performance_logging).__call__
         )
+
+    # Session resolver: attach session bundle (auth mode + clients) to request
+    middleware_stack.append(SessionResolverMiddleware().__call__)
     
     # Error handling (early to catch all errors)
     middleware_stack.append(ErrorHandlingMiddleware().__call__)

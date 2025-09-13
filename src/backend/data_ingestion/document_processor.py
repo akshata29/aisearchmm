@@ -14,6 +14,10 @@ from openai import AsyncAzureOpenAI, api_version
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.indexes.aio import SearchIndexClient, SearchIndexerClient
 from azure.storage.blob.aio import BlobServiceClient
+from azure.core.credentials import AzureKeyCredential
+from core.azure_client_factory import ClientFactory, AuthMode, SessionClients
+from core.config import get_config
+import logging
 from data_ingestion.ingestion_models import ProcessRequest
 from data_ingestion.image_verbalization_strategy import (
     IndexerImgVerbalizationStrategy,
@@ -21,7 +25,6 @@ from data_ingestion.image_verbalization_strategy import (
 from data_ingestion.strategy import Strategy
 from constants import USER_AGENT
 from data_ingestion.process_file import ProcessFile
-from azure.identity.aio import DefaultAzureCredential
 import argparse
 
 
@@ -68,63 +71,79 @@ async def main(source: str, indexer_Strategy: Optional[str] = None):
     load_environment_variables()
     documents_to_process_folder, documents_output_folder = setup_directories()
 
-    tokenCredential = DefaultAzureCredential()
+    # Use factory to get clients; rely on existing config values
+    config = get_config()
 
-    document_client = DocumentIntelligenceClient(
-        endpoint=os.environ["DOCUMENTINTELLIGENCE_ENDPOINT"],
-        credential=tokenCredential,
+    if config.azure_openai.api_key or config.search_service.api_key or config.document_intelligence.key:
+        auth_mode = AuthMode.API_KEY
+    else:
+        auth_mode = AuthMode.MANAGED_IDENTITY
+
+    # Use a fixed session id for the document processor
+    session_id = "doc_processor"
+    logger = logging.getLogger(__name__)
+    logger.info("Document processor starting: session_id=%s auth_mode=%s", session_id, auth_mode)
+
+    bundle = await ClientFactory.get_session_clients(session_id, auth_mode)
+    logger.info(
+        "Obtained session bundle for document processor: openai=%s document_intel=%s blob=%s search_index=%s",
+        bool(bundle.openai_client),
+        bool(bundle.document_intelligence_client),
+        bool(bundle.blob_service_client),
+        bool(bundle.search_index_client),
     )
 
-    text_embedding_client = EmbeddingsClient(
-        endpoint=os.environ["AZURE_INFERENCE_EMBED_ENDPOINT"],
-        credential=tokenCredential,
-        model=os.environ["AZURE_INFERENCE_EMBED_MODEL_NAME"],
-    )
+    document_client = bundle.document_intelligence_client
 
-    image_embedding_client = ImageEmbeddingsClient(
-        endpoint=os.environ["AZURE_INFERENCE_EMBED_ENDPOINT"],
-        credential=tokenCredential,
-        model=os.environ["AZURE_INFERENCE_EMBED_MODEL_NAME"],
-    )
+    # For embeddings, prefer the inference clients if present else reuse AOAI wrapper
+    text_embedding_client = None
+    image_embedding_client = None
+    # If inference endpoints are configured and we need separate clients, keep previous behavior
+    if os.environ.get("AZURE_INFERENCE_EMBED_ENDPOINT") and os.environ.get("AZURE_INFERENCE_EMBED_MODEL_NAME"):
+        # Caller previously used token credential; reuse AAD when available
+        token_cred = bundle.credential
+        if token_cred:
+            text_embedding_client = EmbeddingsClient(
+                endpoint=os.environ["AZURE_INFERENCE_EMBED_ENDPOINT"],
+                credential=token_cred,
+                model=os.environ["AZURE_INFERENCE_EMBED_MODEL_NAME"],
+            )
+            image_embedding_client = ImageEmbeddingsClient(
+                endpoint=os.environ["AZURE_INFERENCE_EMBED_ENDPOINT"],
+                credential=token_cred,
+                model=os.environ["AZURE_INFERENCE_EMBED_MODEL_NAME"],
+            )
 
-    search_client = SearchClient(
-        index_name=os.environ["SEARCH_INDEX_NAME"],
-        endpoint=os.environ["SEARCH_SERVICE_ENDPOINT"],
-        credential=tokenCredential,
-        base_user_agent=USER_AGENT,
-    )
+    # Fallback: use AOAI embeddings via openai client
+    if text_embedding_client is None:
+        class AOAIWrapper:
+            def __init__(self, client, model):
+                self.client = client
+                self.model = model
 
-    index_client = SearchIndexClient(
-        index_name=os.environ["SEARCH_INDEX_NAME"],
-        endpoint=os.environ["SEARCH_SERVICE_ENDPOINT"],
-        credential=tokenCredential,
-        user_agent_policy=UserAgentPolicy(base_user_agent=USER_AGENT),
-    )
+            async def embed(self, input):
+                if isinstance(input, str):
+                    input = [input]
+                return await self.client.embeddings.create(input=input, model=self.model)
+
+        text_embedding_client = AOAIWrapper(bundle.openai_client, config.azure_openai.embedding_deployment)
+        image_embedding_client = text_embedding_client
+
+    search_client = bundle.get_search_client(config.search_service.index_name)
+
+    index_client = bundle.search_index_client
 
     indexer_Client = SearchIndexerClient(
-        endpoint=os.environ["SEARCH_SERVICE_ENDPOINT"],
-        credential=tokenCredential,
+        endpoint=config.search_service.endpoint,
+        credential=(AzureKeyCredential(config.search_service.api_key) if config.search_service.api_key else bundle.credential),
         user_agent_policy=UserAgentPolicy(base_user_agent=USER_AGENT),
     )
 
-    # Create regular OpenAI client for image descriptions
-    openai_client = AsyncAzureOpenAI(
-        azure_ad_token=(
-            await tokenCredential.get_token(
-                "https://cognitiveservices.azure.com/.default"
-            )
-        ).token,
-        api_version="2024-08-01-preview",
-        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-    )
-    
-    # Create instructor client for structured outputs (if needed elsewhere)
+    # Create OpenAI/instructor clients
+    openai_client = bundle.openai_client
     instructor_openai_client = instructor.from_openai(openai_client)
 
-    blob_service_client = BlobServiceClient(
-        account_url=os.environ["ARTIFACTS_STORAGE_ACCOUNT_URL"],
-        credential=tokenCredential,
-    )
+    blob_service_client = bundle.blob_service_client
 
     strategy: Strategy | None = None
     request: Optional[ProcessRequest] = None
@@ -166,23 +185,36 @@ async def main(source: str, indexer_Strategy: Optional[str] = None):
                 process_file, documents_to_process_folder, documents_output_folder
             )
         elif source == "blobs":
-            await process_blobs(process_file, *get_blob_storage_credentials())
+            # prefer session bundle's blob client when present; pass bundle so process_blobs can reuse it
+            await process_blobs(process_file, bundle, *get_blob_storage_credentials())
         else:
             raise ValueError("Invalid source. Must be 'files' or 'blobs'.")
     else:
         raise ValueError("Invalid indexer strategy. Check readme for available.")
 
     print("Done")
-    await document_client.close()
-    await text_embedding_client.close()
-    await image_embedding_client.close()
-    await blob_service_client.close()
-    await search_client.close()
-    await index_client.close()
-    await indexer_Client.close()
-    await openai_client.close()
-    await instructor_openai_client.close()
-    await tokenCredential.close()
+    # Close clients if they expose an async close()
+    async def _maybe_close(obj):
+        try:
+            if obj is None:
+                return
+            close = getattr(obj, "close", None)
+            if close is not None:
+                await close()
+        except Exception:
+            pass
+
+    await _maybe_close(document_client)
+    await _maybe_close(text_embedding_client)
+    await _maybe_close(image_embedding_client)
+    await _maybe_close(blob_service_client)
+    await _maybe_close(search_client)
+    await _maybe_close(index_client)
+    await _maybe_close(indexer_Client)
+    await _maybe_close(openai_client)
+    await _maybe_close(instructor_openai_client)
+    # Close the session bundle to release any cached resources
+    await bundle.close()
 
 
 async def process_files(
@@ -210,17 +242,25 @@ async def process_files(
 
 
 async def process_blobs(
-    process_file, storage_account_name: str, blob_container_name: str, sas_token: str
+    process_file,
+    bundle: Optional[SessionClients],
+    storage_account_name: str,
+    blob_container_name: str,
+    sas_token: str,
 ):
     print(f"storage_account_name: {storage_account_name}")
     print(f"blob_container_name: {blob_container_name}")
     print(f"sas_token: {sas_token}")
 
-    blob_service_client = BlobServiceClient(
-        account_url=f"https://{storage_account_name}.blob.core.windows.net",
-        credential=sas_token,
-    )
-    container_client = blob_service_client.get_container_client(blob_container_name)
+    # If a session bundle with an existing blob_service_client is provided, reuse it
+    if bundle and getattr(bundle, "blob_service_client", None):
+        container_client = bundle.blob_service_client.get_container_client(blob_container_name)
+    else:
+        blob_service_client = BlobServiceClient(
+            account_url=f"https://{storage_account_name}.blob.core.windows.net",
+            credential=sas_token,
+        )
+        container_client = blob_service_client.get_container_client(blob_container_name)
 
     blobs = container_client.list_blobs(include=["metadata"])
 

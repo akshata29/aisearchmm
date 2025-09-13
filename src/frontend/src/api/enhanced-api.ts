@@ -26,6 +26,40 @@ const API_CONFIG = {
     credentials: 'same-origin' as RequestCredentials,
 };
 
+// Ensure a per-browser session id exists and return session-related headers.
+function ensureSession() {
+    try {
+        if (!localStorage.getItem('session_id')) {
+            const id = (window.crypto && (window.crypto as any).randomUUID)
+                ? (window.crypto as any).randomUUID()
+                : `sid-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+            localStorage.setItem('session_id', id);
+        }
+    } catch (e) {
+        // best-effort; ignore
+        if (!localStorage.getItem('session_id')) {
+            localStorage.setItem('session_id', `sid-${Date.now()}`);
+        }
+    }
+}
+
+export function getSessionHeaders(): Record<string, string> {
+    ensureSession();
+    const sessionId = localStorage.getItem('session_id') || '';
+    const useMi = localStorage.getItem('use_managed_identity') === 'true' ? 'true' : 'false';
+    return {
+        'X-Session-Id': sessionId,
+        'X-Use-Managed-Identity': useMi,
+    };
+}
+
+// Expose helper for legacy components or non-module users in the app
+try {
+    (window as any).getSessionHeaders = getSessionHeaders;
+} catch (e) {
+    // ignore in non-browser or restricted environments
+}
+
 /**
  * Enhanced fetch wrapper with error handling and timeout
  */
@@ -38,9 +72,16 @@ async function apiRequest<T>(
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
+        const mergedHeaders = {
+            ...API_CONFIG.headers,
+            ...getSessionHeaders(),
+            ...(options.headers || {}),
+        };
+
         const response = await fetch(endpoint, {
             ...API_CONFIG,
             ...options,
+            headers: mergedHeaders,
             signal: controller.signal,
         });
 
@@ -137,10 +178,14 @@ export async function sendChatApi(
             onMessage(message);
         };
 
+        // Single fetchEventSource call that includes session headers so backend can pick auth mode
         await fetchEventSource(API_ENDPOINTS.CHAT, {
             openWhenHidden: true,
             method: 'POST',
-            headers: API_CONFIG.headers,
+            headers: {
+                ...API_CONFIG.headers,
+                ...getSessionHeaders(),
+            },
             body: JSON.stringify({
                 query: message,
                 request_id: requestId,
@@ -209,17 +254,14 @@ export async function uploadFiles(files: File[]): Promise<UploadResponse> {
                 method: 'POST',
                 body: formData,
                 credentials: 'same-origin',
+                headers: getSessionHeaders(),
                 signal: controller.signal,
             });
 
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                throw new ApiError(
-                    'Upload failed',
-                    response.status,
-                    `HTTP_${response.status}`
-                );
+                throw new ApiError('Upload failed', response.status, `HTTP_${response.status}`);
             }
 
             return await response.json();
@@ -271,17 +313,14 @@ export async function processDocuments(request: ProcessDocumentRequest): Promise
                 method: 'POST',
                 body: formData,
                 credentials: 'same-origin',
+                headers: getSessionHeaders(),
                 signal: controller.signal,
             });
 
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                throw new ApiError(
-                    'Document processing failed',
-                    response.status,
-                    `HTTP_${response.status}`
-                );
+                throw new ApiError('Document processing failed', response.status, `HTTP_${response.status}`);
             }
 
             return await response.json();
@@ -307,10 +346,13 @@ export async function deleteIndex(): Promise<unknown> {
     const tryCall = async (path: string) => {
         const response = await fetch(path, {
             method: 'POST',
-            headers: API_CONFIG.headers,
+            headers: {
+                ...API_CONFIG.headers,
+                ...getSessionHeaders(),
+            },
             body: JSON.stringify({ cascade: true }),
         });
-        
+
         const responseText = await response.text();
         let responseData: unknown = {};
         

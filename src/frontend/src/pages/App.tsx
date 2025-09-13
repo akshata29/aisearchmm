@@ -1,6 +1,6 @@
 import { Caption1, FluentProvider, webDarkTheme, webLightTheme } from "@fluentui/react-components";
 import { Title1 } from "@fluentui/react-components";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import "./App.css";
 import { Header } from "../components/layout/Header/Header";
@@ -23,6 +23,29 @@ function AppContent() {
     const { darkMode, setDarkMode } = useTheme();
     const [newQ, setnewQ] = useState(false);
     const [selectedTab, setSelectedTab] = useState("chat");
+    const [isAdmin, setIsAdmin] = useState(false);
+
+    useEffect(() => {
+        // Fetch authoritative runtime config from backend
+        (async () => {
+            try {
+                const url = '/api/runtime-config' + (import.meta.env.DEV ? `?t=${Date.now()}` : '');
+                console.debug('[App] fetching runtime-config ->', url);
+                const res = await fetch(url, { credentials: 'same-origin' });
+                console.debug('[App] runtime-config response status', res.status);
+                if (res.ok) {
+                    const data = await res.json();
+                    console.debug('[App] runtime-config payload', data);
+                    setIsAdmin(Boolean(data?.isAdmin));
+                } else {
+                    console.warn('[App] runtime-config fetch failed', res.status, await res.text());
+                }
+            } catch (e) {
+                // ignore and keep defaults
+                console.warn('Failed to load runtime config', e);
+            }
+        })();
+    }, []);
 
     const handleTabSelect = (tabId: string) => {
         setSelectedTab(tabId);
@@ -32,11 +55,15 @@ function AppContent() {
         }
     };
 
+    // isAdmin is fetched from server; fall back to runtime-injected value if present
+    const injected = Boolean(window.__RUNTIME_CONFIG__?.['IS_ADMIN'] === true || window.__RUNTIME_CONFIG__?.['IS_ADMIN'] === 'true');
+    const effectiveIsAdmin = isAdmin || injected;
+
     return (
         <FluentProvider theme={darkMode ? webDarkTheme : webLightTheme}>
             <div className="container">
-                <Header darkMode={darkMode} toggleMode={setDarkMode} />
-                <TabNavigation selectedTab={selectedTab} onTabSelect={handleTabSelect} />
+                <Header darkMode={darkMode} toggleMode={setDarkMode} isAdmin={effectiveIsAdmin} />
+                <TabNavigation selectedTab={selectedTab} onTabSelect={handleTabSelect} isAdmin={effectiveIsAdmin} />
 
                 <div className="content-wrapper">
                     {selectedTab === "chat" ? (
@@ -47,6 +74,7 @@ function AppContent() {
                                 setConfig={setConfig} 
                                 onNewChat={onNewChat} 
                                 chats={Object.values(chats || {})} 
+                                isAdmin={effectiveIsAdmin}
                             />
                             
                             <div className="content">
@@ -88,11 +116,11 @@ function AppContent() {
                                 </div>
                             </div>
                         </>
-                    ) : selectedTab === "upload" ? (
+                    ) : selectedTab === "upload" && isAdmin ? (
                         <ErrorBoundary>
                             <ProfessionalDocumentUpload />
                         </ErrorBoundary>
-                    ) : selectedTab === "admin" ? (
+                    ) : selectedTab === "admin" && isAdmin ? (
                         <ErrorBoundary>
                             <Admin />
                         </ErrorBoundary>

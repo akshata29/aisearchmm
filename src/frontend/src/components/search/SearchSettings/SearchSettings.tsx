@@ -76,7 +76,7 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     React.useEffect(() => {
         const loadDocumentTypes = async () => {
             try {
-                const response = await fetch(buildApiUrl('get_document_types'));
+                const response = await fetch(buildApiUrl('get_document_types'), { headers: (window as any).getSessionHeaders ? (window as any).getSessionHeaders() : {} });
                 if (response.ok) {
                     const result = await response.json();
                     if (result.success && result.document_types) {
@@ -218,6 +218,8 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
                     />
                 }
             />
+
+            {/* Managed Identity toggle moved to Header for global placement */}
             <Switch
                 id="useKnowledgeAgentSwitch"
                 checked={config.use_knowledge_agent}

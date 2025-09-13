@@ -86,7 +86,8 @@ export const Admin: React.FC = () => {
             const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
             
             const response = await fetch(buildApiUrl('api/admin/documents'), {
-                signal: controller.signal
+                signal: controller.signal,
+                headers: (window as any).getSessionHeaders ? (window as any).getSessionHeaders() : undefined,
             });
             
             clearTimeout(timeoutId);
@@ -125,7 +126,8 @@ export const Admin: React.FC = () => {
             const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
             
             const response = await fetch(buildApiUrl(`api/admin/document_chunks?document_title=${encodeURIComponent(documentTitle)}`), {
-                signal: controller.signal
+                signal: controller.signal,
+                headers: (window as any).getSessionHeaders ? (window as any).getSessionHeaders() : undefined,
             });
             
             clearTimeout(timeoutId);
@@ -178,6 +180,7 @@ export const Admin: React.FC = () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(window as any).getSessionHeaders ? (window as any).getSessionHeaders() : {},
                 },
                 body: JSON.stringify(body),
             });

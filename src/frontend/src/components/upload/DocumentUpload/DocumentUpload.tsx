@@ -42,6 +42,7 @@ import {
 } from '@fluentui/react-icons';
 import './DocumentUpload.css';
 import { deleteIndex as deleteIndexApi } from '../../../api/api';
+import { getSessionHeaders } from '../../../api/enhanced-api';
 import { TIMEOUTS } from '../../../constants/app';
 import { buildApiUrl } from '../../../utils/api-config';
 
@@ -131,7 +132,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
     React.useEffect(() => {
         const loadDocumentTypes = async () => {
             try {
-                const response = await fetch(buildApiUrl('get_document_types'));
+                const response = await fetch(buildApiUrl('get_document_types'), { headers: getSessionHeaders() });
                 if (response.ok) {
                     const result = await response.json();
                     if (result.success && result.document_types) {
@@ -158,6 +159,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
             // Call backend API to extract metadata
             const response = await fetch(buildApiUrl('extract_metadata'), {
                 method: 'POST',
+                headers: getSessionHeaders(),
                 body: formData,
             });
             
@@ -261,9 +263,10 @@ const ProfessionalDocumentUpload: React.FC = () => {
                 const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
 
                 try {
-                    const response = await fetch(buildApiUrl(`upload_status?upload_id=${uploadId}`), {
-                        signal: controller.signal
-                    });
+                        const response = await fetch(buildApiUrl(`upload_status?upload_id=${uploadId}`), {
+                            signal: controller.signal,
+                            headers: getSessionHeaders(),
+                        });
                     clearTimeout(timeoutId);
                     
                     const result = await response.json();
@@ -395,6 +398,8 @@ const ProfessionalDocumentUpload: React.FC = () => {
 
             const uploadResponse = await fetch(buildApiUrl('upload'), {
                 method: 'POST',
+                // Do not set Content-Type for FormData; include session headers only
+                headers: getSessionHeaders(),
                 body: formData,
                 signal: uploadController.signal,
             });
@@ -413,6 +418,7 @@ const ProfessionalDocumentUpload: React.FC = () => {
             const processResponse = await fetch(buildApiUrl('process_document'), {
                 method: 'POST',
                 headers: {
+                    ...getSessionHeaders(),
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({

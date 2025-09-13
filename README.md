@@ -301,4 +301,109 @@ The following table maps the roles used by the application to their respective f
 - Deployment fails for 'Cohere' in marketplace subscription !['Error from azd up'](docs/images/marketplace_error.png)
   - Ensure your subscription is supported or enabled for Marketplace deployment [Learn more](https://learn.microsoft.com/en-us/azure/ai-foundry/how-to/deploy-models-serverless?tabs=azure-ai-studio#prerequisites)
   - There is a known issue of conflict operation between Marketplace subscription and endpoint deployment. **Rerun deployment** to fix it
+ 
+## Local Authentication & Managed Identity
+
+This project supports two AAD-based authentication modes when running locally or in Azure: API key based auth (API_KEY) and AAD-based auth (managed_identity in the app). Note: in this repo "managed_identity" means "use AAD-based auth" — this can be a managed identity in Azure or any service principal (client id/secret) provided through environment variables.
+
+Summary:
+- DefaultAzureCredential (the library used by the app) will try multiple credential sources in order. Common sources include: Environment (client id / secret), Managed Identity, Visual Studio/VS Code cache, Azure CLI (your user). If the Environment variables AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_TENANT_ID exist in the process environment, EnvironmentCredential will be used first.
+- The project loads `src/backend/.env` early during startup (see `core/config.py`), so values in that file are placed into process environment variables for local runs.
+
+If you want to run the app locally as your user (Azure CLI credential) instead of using the service principal in `.env`
+
+1) Option A — Temporarily unset the SPN env vars in your session and run the app (PowerShell):
+
+```powershell
+Remove-Item Env:AZURE_CLIENT_ID -ErrorAction SilentlyContinue
+Remove-Item Env:AZURE_CLIENT_SECRET -ErrorAction SilentlyContinue
+Remove-Item Env:AZURE_TENANT_ID -ErrorAction SilentlyContinue
+az login
+# run the app in the same shell
+python .\src\backend\app.py
+```
+
+2) Option B — Change the credential used for local debugging (code change)
+- Use the Azure CLI credential explicitly while developing:
+
+```python
+from azure.identity import AzureCliCredential
+credential = AzureCliCredential()
+```
+
+- Or keep DefaultAzureCredential but exclude environment credentials so it falls back to the CLI cached user:
+
+```python
+from azure.identity import DefaultAzureCredential
+credential = DefaultAzureCredential(exclude_environment_credential=True)
+```
+
+Where to change: the factory that builds credentials is `src/backend/core/azure_client_factory.py`. You can make the change locally for development and revert before deployment.
+
+If you intend to use the service principal defined in `src/backend/.env` (the SPN client id / secret), you must grant RBAC roles to that SPN — granting roles to your user account will not affect tokens issued for the SPN.
+
+Example: how to find the SPN object id (PowerShell / az CLI)
+
+```powershell
+#$clientId from .env (example):
+#$clientId = "fb3c0e70-f3bb-46a1-9f0b-2587b49a3d0c"
+az ad sp show --id $clientId --query id -o tsv
+```
+
+Recommended minimal RBAC roles (grant on each resource, scope to resource where possible):
+- Storage (read documents/images): Storage Blob Data Reader
+- Cognitive Search (query/index read): Search Index Data Reader (or Search Data Reader if available)
+- Azure OpenAI / Cognitive Services (run model/embedding calls): Cognitive Services OpenAI User
+
+Example role assignment commands (PowerShell friendly). Replace placeholders with your values:
+
+```powershell
+#$objectId = $(az ad sp show --id <clientId> --query objectId -o tsv)
+#$storageId = "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<storage-name>"
+#$searchId  = "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Search/searchServices/<search-name>"
+#$openaiId  = "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<openai-name>"
+
+az role assignment create --assignee-object-id $objectId --role "Storage Blob Data Reader" --scope $storageId
+az role assignment create --assignee-object-id $objectId --role "Search Index Data Reader" --scope $searchId
+az role assignment create --assignee-object-id $objectId --role "Cognitive Services OpenAI Contributor" --scope $openaiId
+```
+
+Quick verification
+- Check role assignments for the object id:
+
+```powershell
+az role assignment list --assignee $objectId -o table
+```
+
+- Check Activity Log for the resource in the Azure portal to see any failed 403 authorization attempts — the log shows the principal and operation name that failed.
+
+Token inspection (quick way to confirm which principal was used)
+
+```python
+from azure.identity import DefaultAzureCredential
+import base64, json
+
+cred = DefaultAzureCredential()
+token = cred.get_token("https://management.azure.com/.default")
+print("expires_on:", token.expires_on)
+jwt = token.token
+parts = jwt.split('.')
+payload_b64 = parts[1] + '=' * (-len(parts[1]) % 4)
+print(json.dumps(json.loads(base64.urlsafe_b64decode(payload_b64)), indent=2))
+```
+
+Look for claims like `appid` or `azp` (client id for SPN) or `upn` / `preferred_username` (user principal) or `oid` (object id). If the `appid` equals the client id in `.env`, EnvironmentCredential (the SPN) was used.
+
+Async loop warning
+- If you see warnings about "Future attached to a different loop" from `azure.identity.aio` on Windows/Python, it usually means async/sync code is mixing. Two mitigations:
+   - Use the async clients and `azure.identity.aio.DefaultAzureCredential()` inside async code, or
+   - Use sync clients and `azure.identity.DefaultAzureCredential()` consistently. The codebase already creates async clients in `core/azure_client_factory.py`; ensure you create the credential once and reuse it (the factory does this).
+
+Example: what we ran in this repo (you can adapt these for your deployment)
+- The `.env` in this repo contains a service principal client id `fb3c0e70-f3bb-46a1-9f0b-2587b49a3d0c` (do NOT check secrets into public repos).
+- We resolved the service principal object id and assigned the three minimal roles on the sample resources in the repo (storage/search/AOAI). If you use your own resources, replace resource names and scopes.
+
+If you want, we can add an optional startup flag to force Azure CLI credential in dev mode; tell me if you'd like that patch and I will prepare it.
+
+---
 

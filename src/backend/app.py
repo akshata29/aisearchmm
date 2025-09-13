@@ -58,6 +58,7 @@ from constants import USER_AGENT
 
 # Import production-ready components
 from core.config import get_config, ApplicationConfig
+from core.azure_client_factory import ClientFactory, AuthMode
 from core.exceptions import ApplicationError, ConfigurationError, handle_azure_error
 from middleware import create_middleware_stack
 from utils.logging_config import setup_logging, StructuredLogger
@@ -83,70 +84,42 @@ class ProductionApp:
     async def initialize_azure_clients(self) -> tuple:
         """Initialize Azure service clients with proper error handling and resilience."""
         try:
-            # Initialize credentials
-            token_credential = DefaultAzureCredential()
-            token_provider = get_bearer_token_provider(
-                token_credential,
-                "https://cognitiveservices.azure.com/.default",
-            )
-
-            # Initialize search service client
-            search_credential = (
-                AzureKeyCredential(self.config.search_service.api_key)
-                if self.config.search_service.api_key
-                else token_credential
-            )
-
-            # Common client arguments
-            client_kwargs = {
-                "user_agent_policy": UserAgentPolicy(base_user_agent=USER_AGENT),
-            }
-
-            self._search_client = SearchClient(
-                endpoint=self.config.search_service.endpoint,
-                index_name=self.config.search_service.index_name,
-                credential=search_credential,
-                **client_kwargs
-            )
-
-            self._index_client = SearchIndexClient(
-                endpoint=self.config.search_service.endpoint,
-                credential=search_credential,
-                **client_kwargs
-            )
-
-            # Initialize OpenAI client with timeout configuration
-            if self.config.azure_openai.api_key:
-                self._openai_client = AsyncAzureOpenAI(
-                    api_key=self.config.azure_openai.api_key,
-                    api_version=self.config.azure_openai.api_version,
-                    azure_endpoint=self.config.azure_openai.endpoint,
-                    timeout=self.config.azure_openai.timeout,
-                    max_retries=self.config.azure_openai.max_retries,
-                )
+            # Auto-detect auth mode from existing configured API keys to avoid new env vars
+            if self.config.azure_openai.api_key or self.config.search_service.api_key or self.config.document_intelligence.key:
+                auth_mode = AuthMode.API_KEY
             else:
-                self._openai_client = AsyncAzureOpenAI(
-                    azure_ad_token_provider=token_provider,
-                    api_version=self.config.azure_openai.api_version,
-                    azure_endpoint=self.config.azure_openai.endpoint,
-                    timeout=self.config.azure_openai.timeout,
-                    max_retries=self.config.azure_openai.max_retries,
-                )
+                auth_mode = AuthMode.MANAGED_IDENTITY
 
-            # Initialize Blob Storage client
-            self._blob_service_client = BlobServiceClient(
-                account_url=self.config.storage.artifacts_account_url,
-                credential=token_credential,
-            )
+            # Use a default application-level session id
+            session_id = "app_startup"
 
-            self.logger.info("Azure clients initialized successfully")
-            
+            # Clear any cached client bundles created on other event loops to avoid
+            # "Future attached to a different loop" errors when using aio credentials.
+            # This ensures credentials are constructed on the current running loop.
+            try:
+                await ClientFactory.clear_all()
+            except Exception:
+                self.logger.debug("Failed to clear cached client bundles (ignored)", exc_info=True)
+
+            bundle = await ClientFactory.get_session_clients(session_id, auth_mode)
+
+            # Save clients locally
+            # The app previously expected a SearchClient (for a specific index name) and SearchIndexClient
+            self._openai_client = bundle.openai_client
+            self._blob_service_client = bundle.blob_service_client
+            self._search_client = bundle.get_search_client(self.config.search_service.index_name)
+            self._index_client = bundle.search_index_client
+            token_credential = bundle.credential
+
+            self.logger.info("Azure clients initialized successfully via ClientFactory", extra={"auth_mode": auth_mode.value})
+
             return (
                 self._search_client,
                 self._index_client,
                 self._openai_client,
                 self._blob_service_client,
-                token_credential
+                token_credential,
+                auth_mode,
             )
 
         except Exception as e:
@@ -157,7 +130,7 @@ class ProductionApp:
         """Create and configure the web application."""
         try:
             # Initialize Azure clients
-            search_client, index_client, openai_client, blob_service_client, token_credential = (
+            search_client, index_client, openai_client, blob_service_client, token_credential, auth_mode = (
                 await self.initialize_azure_clients()
             )
 
@@ -180,12 +153,15 @@ class ProductionApp:
             )
 
             # Initialize knowledge agent with error handling
+            # pass the detected auth_mode so components can log which auth they will use
             knowledge_agent = await self._initialize_knowledge_agent(
                 search_client,
                 index_client,
                 blob_service_client,
                 artifacts_container_client,
-                samples_container_client
+                samples_container_client,
+                token_credential,
+                auth_mode,
             )
 
             # Initialize search grounding
@@ -198,7 +174,9 @@ class ProductionApp:
                 blob_service_client,
                 samples_container_client,
                 artifacts_container_client,
+                auth_mode=auth_mode,
             )
+            self.logger.info('SearchGroundingRetriever created with auth_mode', extra={'auth_mode': auth_mode.value})
 
             # Create web application with middleware
             middleware_stack = create_middleware_stack(
@@ -250,6 +228,8 @@ class ProductionApp:
         blob_service_client: BlobServiceClient,
         artifacts_container_client,
         samples_container_client
+        , token_credential=None,
+        auth_mode: AuthMode = None
     ) -> Optional[KnowledgeAgentGrounding]:
         """Initialize knowledge agent with proper error handling."""
         if not self.config.knowledge_agent_name:
@@ -263,7 +243,7 @@ class ProductionApp:
                 credential=(
                     AzureKeyCredential(self.config.search_service.api_key)
                     if self.config.search_service.api_key
-                    else DefaultAzureCredential()
+                    else (token_credential or DefaultAzureCredential())
                 ),
             )
 
@@ -281,6 +261,7 @@ class ProductionApp:
                 blob_service_client,
                 samples_container_client,
                 artifacts_container_client,
+                auth_mode=auth_mode,
             )
 
             # Create the agent after object initialization to avoid event loop issues
@@ -323,6 +304,7 @@ class ProductionApp:
             # Add main routes
             app.add_routes([
                 web.get("/", lambda _: web.FileResponse(current_directory / "static/index.html")),
+                web.get("/api/runtime-config", self._runtime_config_handler),
                 web.get("/list_indexes", lambda _: self._list_indexes(index_client)),
                 web.post("/delete_index", lambda request: self._delete_index(request, index_client)),
                 web.post("/api/delete_index", lambda request: self._delete_index(request, index_client)),
@@ -336,7 +318,7 @@ class ProductionApp:
             ])
             
             # Attach admin routes
-            admin_handler.attach_to_app(app, search_client)
+            admin_handler.attach_to_app(app)
             
             # Add static file serving
             app.router.add_static("/", path=current_directory / "static", name="static")
@@ -346,6 +328,31 @@ class ProductionApp:
         except Exception as e:
             self.logger.error(f"Failed to setup routes: {e}", exc_info=True)
             raise
+
+    async def _runtime_config_handler(self, request: web.Request) -> web.Response:
+        """Return a small JSON blob with runtime flags for the current session.
+
+        This endpoint is authoritative for the UI; it reads server-side env vars
+        or (optionally) user/session identity to compute values like isAdmin.
+        """
+        try:
+            # Log request for diagnostics
+            try:
+                self.logger.info("runtime-config requested", extra={"path": request.path, "remote": request.remote})
+            except Exception:
+                pass
+
+            # Default to env var; replace with per-user logic if you have auth
+            is_admin = os.environ.get('IS_ADMIN', 'false').lower() == 'true'
+            headers = {
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+            return web.json_response({"isAdmin": bool(is_admin)}, headers=headers)
+        except Exception as e:
+            self.logger.warning(f"Failed to compute runtime config: {e}")
+            return web.json_response({"isAdmin": False})
 
     async def _list_indexes(self, index_client: SearchIndexClient) -> web.Response:
         """List available search indexes."""
@@ -774,23 +781,27 @@ if __name__ == "__main__":
         
         try:
             app = loop.run_until_complete(create_app_instance())
-            
-            # Create and run application
+
+            # Create and run application on the same event loop to avoid cross-loop
+            # credential creation issues. Using AppRunner/TCPSite prevents
+            # web.run_app from creating or switching to a different loop.
             logger.info(
                 f"Starting server on {config.server.host}:{config.server.port}",
                 host=config.server.host,
                 port=config.server.port,
                 environment=config.environment
             )
-            
-            # Run the application
-            web.run_app(
-                app,
-                host=config.server.host,
-                port=config.server.port,
-                keepalive_timeout=config.server.keepalive_timeout,
-                access_log_format='%a "%r" %s %b "%{Referer}i" "%{User-Agent}i" %Dms'
-            )
+
+            runner = web.AppRunner(app)
+            loop.run_until_complete(runner.setup())
+            site = web.TCPSite(runner, host=config.server.host, port=config.server.port)
+            loop.run_until_complete(site.start())
+
+            try:
+                loop.run_forever()
+            finally:
+                # Clean up the runner explicitly on shutdown
+                loop.run_until_complete(runner.cleanup())
         except KeyboardInterrupt:
             logger.info("Application stopped by user")
         except Exception as e:

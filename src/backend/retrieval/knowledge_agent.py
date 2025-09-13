@@ -26,6 +26,7 @@ from azure.search.documents.indexes.models import (
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.indexes.aio import SearchIndexClient
 from retrieval.grounding_retriever import GroundingRetriever
+from core.azure_client_factory import AuthMode
 
 logger = logging.getLogger("grounding")
 
@@ -45,6 +46,7 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         blob_service_client=None,
         container_client=None,
         artifacts_container_client=None,
+        auth_mode: Optional[AuthMode] = None,
     ):
         self.retrieval_agent_client = retrieval_agent_client
         self.search_client = search_client
@@ -55,6 +57,13 @@ class KnowledgeAgentGrounding(GroundingRetriever):
         self._blob_service_client = blob_service_client
         self._container_client = container_client
         self._artifacts_container_client = artifacts_container_client  # For images/figures
+        self.auth_mode = auth_mode  # Store auth_mode for logging
+
+        # Log which authentication mode this grounding instance will use
+        try:
+            logger.info("KnowledgeAgentGrounding created", extra={"auth_mode": self.auth_mode.value if self.auth_mode else None})
+        except Exception:
+            logger.debug("Could not log auth_mode for KnowledgeAgentGrounding", exc_info=True)
         
         # Store parameters for potential agent recreation during retrieval
         self.azure_openai_endpoint = azure_openai_endpoint
@@ -806,7 +815,7 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                         try:
                             content_path = ref.get("content_path") or ref.get("content")
                             if content_path:
-                                image_url = await citation_handler._get_file_url(content_path)
+                                image_url = await citation_handler._get_file_url(content_path, auth_mode=getattr(self, 'auth_mode', None))
                                 citation["image_url"] = image_url
                                 citation["is_image"] = True
                         except Exception as e:
@@ -968,43 +977,21 @@ class KnowledgeAgentGrounding(GroundingRetriever):
     async def _generate_image_url(self, blob_path: str) -> str:
         """Generate a signed URL for an image blob path."""
         try:
+            # Delegate to CitationFilesHandler which already implements robust
+            # fallback logic (user delegation key -> account key SAS) and logging.
+            from handlers.citation_file_handler import CitationFilesHandler
+
             if not self._blob_service_client or not self._artifacts_container_client:
-                logger.warning("Blob service client or artifacts container client not available for image URL generation")
+                logger.warning("Blob service client or artifacts container client not available for image URL generation", extra={"auth_mode": getattr(self, 'auth_mode', None)})
                 return ""
-                
-            # Clean up the blob path
-            clean_blob_path = blob_path.replace("\\", "/")
-            
-            # Get blob client from artifacts container (where images are stored)
-            blob_client = self._artifacts_container_client.get_blob_client(clean_blob_path)
-            
-            # Generate SAS token for the blob
-            start_time = datetime.utcnow()
-            expiry_time = start_time + timedelta(hours=1)
-            
-            # Create user delegation key
-            user_delegation_key = await self._blob_service_client.get_user_delegation_key(
-                key_start_time=start_time, 
-                key_expiry_time=expiry_time
-            )
-            
-            # Generate SAS token for artifacts container
-            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
-            sas_token = generate_blob_sas(
-                account_name=blob_client.account_name or "",
-                container_name=self._artifacts_container_client.container_name,  # Use artifacts container
-                blob_name=clean_blob_path,
-                user_delegation_key=user_delegation_key,
-                permission=BlobSasPermissions(read=True),
-                expiry=datetime.utcnow() + timedelta(minutes=60),
-            )
-            
-            signed_url = f"{blob_client.url}?{sas_token}"
-            logger.debug(f"Generated image URL for {blob_path}: {signed_url[:100]}...")
+
+            citation_handler = CitationFilesHandler(self._blob_service_client, self._container_client, self._artifacts_container_client)
+            # reuse the existing handler logic to get a signed URL
+            signed_url = await citation_handler._get_file_url(blob_path, request_id=f"ka_{int(datetime.utcnow().timestamp())}", auth_mode=getattr(self, 'auth_mode', None))
             return signed_url
             
         except Exception as e:
-            logger.error(f"Error generating image URL for {blob_path}: {str(e)}")
+            logger.error(f"Error generating image URL for {blob_path}: {str(e)}", exc_info=True)
             return ""
 
     def get_retrieval_strategy_info(self) -> Dict[str, Any]:

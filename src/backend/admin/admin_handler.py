@@ -67,7 +67,7 @@ class AdminHandler:
         })
 
     @monitor_performance("admin.get_document_statistics")
-    async def get_document_statistics(self, search_client: SearchClient) -> web.Response:
+    async def get_document_statistics(self, request: web.Request) -> web.Response:
         """
         Get comprehensive document statistics from the search index.
         
@@ -80,6 +80,14 @@ class AdminHandler:
         try:
             start_time = time.time()
             
+            # Resolve search client from request session bundle or fallback
+            from core.config import get_config
+            config = get_config()
+            bundle = request.get("session_bundle")
+            if bundle is not None:
+                search_client = bundle.get_search_client(config.search_service.index_name)
+            elif hasattr(request.app, 'search_client'):
+                search_client = request.app.search_client
             # Get all documents in the index with optimized query
             search_results = await search_client.search(
                 search_text="*",
@@ -186,7 +194,7 @@ class AdminHandler:
             }, status=500)
 
     @monitor_performance("admin.delete_document_by_title")
-    async def delete_document_by_title(self, request: web.Request, search_client: SearchClient) -> web.Response:
+    async def delete_document_by_title(self, request: web.Request) -> web.Response:
         """
         Delete all chunks for a specific document title with comprehensive validation.
         
@@ -199,7 +207,16 @@ class AdminHandler:
         """
         operation_id = f"delete_title_{int(time.time())}"
         logger.info("Starting document deletion by title", extra={"operation_id": operation_id})
-        
+        # Resolve search client from the request session bundle or app fallback
+        from core.config import get_config
+        config = get_config()
+        bundle = request.get("session_bundle")
+        if bundle is not None:
+            search_client = bundle.get_search_client(config.search_service.index_name)
+        elif hasattr(request.app, 'search_client'):
+            search_client = request.app.search_client
+        else:
+            raise ApplicationError("Search client not available", status_code=503)
         try:
             # Validate request body
             try:
@@ -317,7 +334,7 @@ class AdminHandler:
             }, status=500)
 
     @monitor_performance("admin.delete_document_by_id")
-    async def delete_document_by_id(self, request: web.Request, search_client: SearchClient) -> web.Response:
+    async def delete_document_by_id(self, request: web.Request) -> web.Response:
         """
         Delete a specific document chunk by content_id with validation.
         
@@ -330,7 +347,16 @@ class AdminHandler:
         """
         operation_id = f"delete_id_{int(time.time())}"
         logger.info("Starting document deletion by ID", extra={"operation_id": operation_id})
-        
+        # Resolve search client from the request session bundle or app fallback
+        from core.config import get_config
+        config = get_config()
+        bundle = request.get("session_bundle")
+        if bundle is not None:
+            search_client = bundle.get_search_client(config.search_service.index_name)
+        elif hasattr(request.app, 'search_client'):
+            search_client = request.app.search_client
+        else:
+            raise ApplicationError("Search client not available", status_code=503)
         try:
             # Validate request body
             try:
@@ -412,7 +438,7 @@ class AdminHandler:
             }, status=500)
 
     @monitor_performance("admin.get_document_chunks")
-    async def get_document_chunks(self, request: web.Request, search_client: SearchClient) -> web.Response:
+    async def get_document_chunks(self, request: web.Request) -> web.Response:
         """
         Get all chunks for a specific document title with full metadata and pagination support.
         
@@ -425,7 +451,16 @@ class AdminHandler:
         """
         operation_id = f"get_chunks_{int(time.time())}"
         logger.info("Starting document chunks retrieval", extra={"operation_id": operation_id})
-        
+        # Resolve search client from the request session bundle or app fallback
+        from core.config import get_config
+        config = get_config()
+        bundle = request.get("session_bundle")
+        if bundle is not None:
+            search_client = bundle.get_search_client(config.search_service.index_name)
+        elif hasattr(request.app, 'search_client'):
+            search_client = request.app.search_client
+        else:
+            raise ApplicationError("Search client not available", status_code=503)
         try:
             document_title = request.query.get("document_title")
             
@@ -538,7 +573,7 @@ class AdminHandler:
                 "operation_id": operation_id
             }, status=500)
 
-    def attach_to_app(self, app: web.Application, search_client: SearchClient) -> None:
+    def attach_to_app(self, app: web.Application, search_client: SearchClient | None = None) -> None:
         """
         Attach admin routes to the aiohttp application with proper error handling.
         
@@ -549,11 +584,12 @@ class AdminHandler:
         logger.info("Attaching admin routes to application")
         
         try:
+            # Use request-scoped bundle when available (resolved by SessionResolverMiddleware)
             app.add_routes([
-                web.get("/api/admin/documents", lambda _: self.get_document_statistics(search_client)),
-                web.get("/api/admin/document_chunks", lambda request: self.get_document_chunks(request, search_client)),
-                web.post("/api/admin/delete_document", lambda request: self.delete_document_by_title(request, search_client)),
-                web.post("/api/admin/delete_chunk", lambda request: self.delete_document_by_id(request, search_client)),
+                web.get("/api/admin/documents", lambda request: self.get_document_statistics(request)),
+                web.get("/api/admin/document_chunks", lambda request: self.get_document_chunks(request)),
+                web.post("/api/admin/delete_document", lambda request: self.delete_document_by_title(request)),
+                web.post("/api/admin/delete_chunk", lambda request: self.delete_document_by_id(request)),
             ])
             
             logger.info("Admin routes successfully attached", extra={

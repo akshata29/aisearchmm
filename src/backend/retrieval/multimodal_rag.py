@@ -41,6 +41,12 @@ class MultimodalRag(RagBase):
         self.blob_service_client = container_client._get_blob_service_client()
         self.knowledge_agent = knowledge_agent
         self.search_grounding = search_grounding
+        # Log auth_mode if available on provided clients
+        try:
+            auth_mode = getattr(knowledge_agent, 'auth_mode', None) or getattr(search_grounding, 'auth_mode', None)
+            logger.info("MultimodalRag initialized", extra={"auth_mode": auth_mode.value if getattr(auth_mode, 'value', None) else None})
+        except Exception:
+            logger.debug("Could not determine auth_mode for MultimodalRag", exc_info=True)
 
     async def _process_request(
         self,
@@ -89,6 +95,26 @@ class MultimodalRag(RagBase):
                         content={"message": message},
                     ),
                 )
+
+            # Propagate per-request auth_mode (if middleware attached it) to the retriever
+            try:
+                # Prefer the original request attached to the response by RagBase
+                req_auth_mode = None
+                orig_req = getattr(response, '_orig_request', None)
+                if orig_req is not None:
+                    req_auth_mode = orig_req.get('auth_mode') if hasattr(orig_req, 'get') else None
+
+                # Fallback: try to read from grounding_retriever or multimodal instance
+                if req_auth_mode is None:
+                    req_auth_mode = getattr(grounding_retriever, 'auth_mode', None) or getattr(self, 'auth_mode', None)
+
+                if req_auth_mode is not None:
+                    try:
+                        grounding_retriever.auth_mode = req_auth_mode
+                    except Exception:
+                        logger.debug("Could not set auth_mode on grounding_retriever", exc_info=True)
+            except Exception:
+                logger.debug("Error while propagating auth_mode to retriever", exc_info=True)
 
             grounding_results = await grounding_retriever.retrieve(
                 user_message, chat_thread, search_config, processing_step_callback

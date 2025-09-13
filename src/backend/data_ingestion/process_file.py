@@ -51,6 +51,9 @@ from azure.search.documents.indexes.models import (
 from azure.storage.blob.aio import BlobServiceClient
 from utils.helpers import get_blob_as_base64
 from collections import defaultdict
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessFile:
@@ -86,6 +89,13 @@ class ProcessFile:
         self.sample_container_client = self.blob_service_client.get_container_client(
             os.environ["SAMPLES_STORAGE_CONTAINER"]
         )
+        # Log inferred auth mode for blob client to aid debugging (api_key vs managed_identity)
+        try:
+            cred = getattr(self.blob_service_client, 'credential', None)
+            inferred_mode = 'api_key' if isinstance(cred, str) else ('managed_identity' if cred else None)
+            logger.info("ProcessFile initialized", extra={"blob_account": getattr(self.blob_service_client, 'account_name', None), "auth_mode": inferred_mode})
+        except Exception:
+            logger.debug("Could not determine auth mode for ProcessFile blob client", exc_info=True)
 
     def _prepare_metadata(self, published_date: str = None, document_type: str = None, expiry_date: str = None):
         """Prepare metadata for document indexing with validation and defaults."""

@@ -34,12 +34,12 @@ export default function useConfig() {
     const [indexes, setIndexes] = useState<string[]>([]);
 
     useEffect(() => {
-        const fetchIndexes = async () => {
-            const indexes = await listIndexes();
-            setIndexes(indexes);
-        };
+        // const fetchIndexes = async () => {
+        //     const indexes = await listIndexes();
+        //     setIndexes(indexes);
+        // };
 
-        fetchIndexes();
+        // fetchIndexes();
     }, []);
 
     return { config, setConfig, indexes };

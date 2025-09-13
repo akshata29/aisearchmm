@@ -67,6 +67,19 @@ class HealthChecker:
         self._search_client = search_client
         self._blob_client = blob_client
         self._openai_client = openai_client
+        try:
+            # Attempt to log auth_mode if provided on blob client or openai client
+            auth_mode = None
+            cred = getattr(blob_client, 'credential', None)
+            if cred is not None:
+                # If credential is a string account key, assume API_KEY
+                if isinstance(cred, str):
+                    auth_mode = 'api_key'
+                else:
+                    auth_mode = 'managed_identity'
+            self.logger.info('HealthChecker clients set', extra={'auth_mode': auth_mode})
+        except Exception:
+            self.logger.debug('Could not determine auth_mode in health checker', exc_info=True)
 
     async def check_health(self, include_detailed: bool = False) -> HealthCheckResult:
         """Perform comprehensive health check."""

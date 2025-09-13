@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from typing import Dict, Any
 from aiohttp import web
@@ -7,6 +8,8 @@ from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from azure.core.exceptions import AzureError, ResourceNotFoundError
 
 from datetime import datetime, timedelta
+from core.config import get_config
+from core.azure_client_factory import AuthMode
 
 # Set up structured logging
 logger = logging.getLogger(__name__)
@@ -154,8 +157,41 @@ class CitationFilesHandler:
                 "remote_addr": request.remote
             })
 
-            # Get signed URL
-            response = await self._get_file_url(filename, request_id)
+            # Prefer a request-scoped bundle (set by SessionResolverMiddleware) so
+            # that we reuse the cached session BlobServiceClient when available.
+            bundle = request.get("session_bundle")
+            if bundle is not None:
+                # derive container clients from the bundle's blob service client
+                blob_service_client = bundle.blob_service_client
+                # Use configured container names from app config (do not hardcode)
+                try:
+                    cfg = get_config()
+                    samples_container_client = blob_service_client.get_container_client(cfg.storage.samples_container)
+                    artifacts_container_client = blob_service_client.get_container_client(cfg.storage.artifacts_container)
+                except Exception:
+                    # If anything goes wrong, fall back to the pre-initialized container clients
+                    samples_container_client = self.container_client
+                    artifacts_container_client = self.artifacts_container_client
+            else:
+                # fall back to the instances provided at construction
+                blob_service_client = self.blob_service_client
+                samples_container_client = self.container_client
+                artifacts_container_client = self.artifacts_container_client
+
+            # Determine auth_mode from session bundle if available and pass it explicitly
+            auth_mode = None
+            if bundle is not None and hasattr(bundle, 'auth_mode'):
+                auth_mode = bundle.auth_mode
+
+            # Get signed URL - pass explicit auth_mode so logic is deterministic
+            response = await self._get_file_url(
+                filename,
+                request_id,
+                blob_service_client=blob_service_client,
+                samples_container_client=samples_container_client,
+                artifacts_container_client=artifacts_container_client,
+                auth_mode=auth_mode,
+            )
             
             duration = time.time() - start_time
             logger.info("Citation file request completed", extra={
@@ -204,7 +240,15 @@ class CitationFilesHandler:
                 "message": "Internal server error"
             }, status=500)
 
-    async def _get_file_url(self, blob_name: str, request_id: str = "") -> str:
+    async def _get_file_url(
+        self,
+        blob_name: str,
+        request_id: str = "",
+        blob_service_client: BlobServiceClient = None,
+        samples_container_client: ContainerClient = None,
+        artifacts_container_client: ContainerClient = None,
+        auth_mode: AuthMode = None,
+    ) -> str:
         """
         Generate a secure SAS URL for the requested file.
         
@@ -219,81 +263,201 @@ class CitationFilesHandler:
             ResourceNotFoundError: If file doesn't exist
             AzureError: If Azure service error occurs
         """
+        # Normalize blob path
+        normalized_blob_name = blob_name.replace("\\", "/")
+
+        # Determine container based on file type
+        is_image = self._is_image_file(normalized_blob_name)
+
+        # If the caller didn't provide container/blob clients, fall back to instance attributes
+        if blob_service_client is None:
+            blob_service_client = self.blob_service_client
+        if samples_container_client is None:
+            samples_container_client = self.container_client
+        if artifacts_container_client is None:
+            artifacts_container_client = self.artifacts_container_client
+
+        container_client = artifacts_container_client if is_image else samples_container_client
+        container_name = "artifacts" if is_image else "samples"
+
+        logger.debug("Generating SAS URL", extra={
+            "request_id": request_id,
+            "blob_name": normalized_blob_name,
+            "is_image": is_image,
+            "container": container_name,
+        })
+
         try:
-            # Normalize blob path
-            normalized_blob_name = blob_name.replace("\\", "/")
-            
-            # Determine container based on file type
-            is_image = self._is_image_file(normalized_blob_name)
-            container_client = self.artifacts_container_client if is_image else self.container_client
-            container_name = "artifacts" if is_image else "samples"
-            
-            logger.debug("Generating SAS URL", extra={
-                "request_id": request_id,
-                "blob_name": normalized_blob_name,
-                "is_image": is_image,
-                "container": container_name
-            })
-            
             # Get blob client
             blob_client = container_client.get_blob_client(normalized_blob_name)
-            
-            # Check if blob exists
+
+            # Check if blob exists. If key-based auth is rejected by the service,
+            # try an AAD-backed client (DefaultAzureCredential) and/or fall back
+            # to account-key SAS using an available key.
             blob_exists = await blob_client.exists()
             if not blob_exists:
                 logger.warning("Requested blob does not exist", extra={
                     "request_id": request_id,
                     "blob_name": normalized_blob_name,
-                    "container": container_name
+                    "container": container_name,
                 })
-                raise ResourceNotFoundError(f"Blob '{normalized_blob_name}' not found in container '{container_name}'")
-            
-            # Generate user delegation key for secure access
+                raise ResourceNotFoundError(
+                    f"Blob '{normalized_blob_name}' not found in container '{container_name}'"
+                )
+
+            # Generate SAS based on explicit auth_mode when provided
             start_time = datetime.utcnow()
             expiry_time = start_time + timedelta(hours=1)
-            
-            user_delegation_key = await self.blob_service_client.get_user_delegation_key(
-                key_start_time=start_time, 
-                key_expiry_time=expiry_time
-            )
-            
-            # Generate SAS token
-            sas_token = generate_blob_sas(
-                account_name=blob_client.account_name or "",
-                container_name=container_client.container_name,
-                blob_name=normalized_blob_name,
-                user_delegation_key=user_delegation_key,
-                permission=BlobSasPermissions(read=True),
-                expiry=datetime.utcnow() + timedelta(minutes=self.sas_duration_minutes),
-            )
+
+            sas_token = None
+            # If auth_mode is explicitly Managed Identity, only use user delegation key
+            if auth_mode == AuthMode.MANAGED_IDENTITY:
+                try:
+                    # Diagnostic: log credential type attached to blob_service_client and try to fetch a token
+                    try:
+                        cred = getattr(blob_service_client, 'credential', None)
+                        if cred is not None:
+                            cred_type = type(cred).__name__
+                        else:
+                            cred_type = None
+                        logger.info("Attempting user-delegation key: blob client credential info", extra={"request_id": request_id, "credential_type": cred_type})
+                        # If credential supports get_token, try to obtain a storage token to validate Bearer issuance
+                        if cred is not None and hasattr(cred, 'get_token'):
+                            try:
+                                token = await cred.get_token("https://storage.azure.com/.default")
+                                logger.info("Credential.get_token succeeded before get_user_delegation_key", extra={"request_id": request_id, "expires_on": getattr(token, 'expires_on', None)})
+                            except Exception as token_ex:
+                                logger.error("Credential.get_token failed before get_user_delegation_key", extra={"request_id": request_id, "error": str(token_ex)}, exc_info=True)
+                        else:
+                            logger.info("BlobServiceClient.credential does not expose get_token; cannot validate token issuance", extra={"request_id": request_id, "credential_type": cred_type})
+                    except Exception:
+                        logger.debug("Credential diagnostic check failed", extra={"request_id": request_id}, exc_info=True)
+
+                    user_delegation_key = await blob_service_client.get_user_delegation_key(
+                        key_start_time=start_time, key_expiry_time=expiry_time
+                    )
+                    sas_token = generate_blob_sas(
+                        account_name=blob_client.account_name or "",
+                        container_name=container_client.container_name,
+                        blob_name=normalized_blob_name,
+                        user_delegation_key=user_delegation_key,
+                        permission=BlobSasPermissions(read=True),
+                        expiry=datetime.utcnow() + timedelta(minutes=self.sas_duration_minutes),
+                    )
+                except Exception as ade:
+                    logger.error("Managed Identity auth selected but user-delegation key request failed", extra={"request_id": request_id, "error": str(ade)})
+                    # Surface error to caller (no silent fallback allowed)
+                    raise
+
+            # If auth_mode is explicitly API_KEY, only use account-key SAS
+            elif auth_mode == AuthMode.API_KEY:
+                # Try to extract an account key from the provided blob_service_client if possible
+                account_key = None
+                try:
+                    cred = getattr(blob_service_client, "credential", None)
+                    if isinstance(cred, str) and cred:
+                        account_key = cred
+                    elif hasattr(cred, "key"):
+                        account_key = getattr(cred, "key")
+                except Exception:
+                    account_key = None
+
+                if not account_key:
+                    account_key = os.environ.get("ARTIFACTS_STORAGE_ACCOUNT_KEY")
+
+                if account_key:
+                    sas_token = generate_blob_sas(
+                        account_name=blob_client.account_name or "",
+                        container_name=container_client.container_name,
+                        blob_name=normalized_blob_name,
+                        account_key=account_key,
+                        permission=BlobSasPermissions(read=True),
+                        expiry=datetime.utcnow() + timedelta(minutes=self.sas_duration_minutes),
+                    )
+                else:
+                    logger.error("API_KEY auth selected but no account key available to generate SAS", extra={"request_id": request_id})
+                    raise
+
+            else:
+                # No explicit auth_mode: preserve original behavior (try user delegation then account-key fallback)
+                try:
+                    user_delegation_key = await blob_service_client.get_user_delegation_key(
+                        key_start_time=start_time, key_expiry_time=expiry_time
+                    )
+                    sas_token = generate_blob_sas(
+                        account_name=blob_client.account_name or "",
+                        container_name=container_client.container_name,
+                        blob_name=normalized_blob_name,
+                        user_delegation_key=user_delegation_key,
+                        permission=BlobSasPermissions(read=True),
+                        expiry=datetime.utcnow() + timedelta(minutes=self.sas_duration_minutes),
+                    )
+                except Exception as ade:
+                    logger.warning(
+                        "User-delegation key unavailable or failed, attempting account-key SAS fallback",
+                        extra={"request_id": request_id, "error": str(ade)}
+                    )
+
+                    account_key = None
+                    try:
+                        cred = getattr(blob_service_client, "credential", None)
+                        if isinstance(cred, str) and cred:
+                            account_key = cred
+                        elif hasattr(cred, "key"):
+                            account_key = getattr(cred, "key")
+                    except Exception:
+                        account_key = None
+
+                    if not account_key:
+                        account_key = os.environ.get("ARTIFACTS_STORAGE_ACCOUNT_KEY")
+
+                    if account_key:
+                        sas_token = generate_blob_sas(
+                            account_name=blob_client.account_name or "",
+                            container_name=container_client.container_name,
+                            blob_name=normalized_blob_name,
+                            account_key=account_key,
+                            permission=BlobSasPermissions(read=True),
+                            expiry=datetime.utcnow() + timedelta(minutes=self.sas_duration_minutes),
+                        )
+                    else:
+                        raise
 
             signed_url = f"{blob_client.url}?{sas_token}"
-            
+
             logger.info("SAS URL generated successfully", extra={
                 "request_id": request_id,
                 "blob_name": normalized_blob_name,
                 "container": container_name,
-                "sas_duration_minutes": self.sas_duration_minutes
+                "sas_duration_minutes": self.sas_duration_minutes,
             })
-            
+
             return signed_url
-            
+
         except ResourceNotFoundError:
             # Re-raise as-is
             raise
         except AzureError as e:
-            logger.error("Azure error generating SAS URL", extra={
-                "request_id": request_id,
-                "blob_name": blob_name,
-                "error_type": "AzureError",
-                "error": str(e)
-            }, exc_info=True)
+            logger.error(
+                "Azure error generating SAS URL",
+                extra={
+                    "request_id": request_id,
+                    "blob_name": blob_name,
+                    "error_type": "AzureError",
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
             raise
         except Exception as e:
-            logger.error("Unexpected error generating SAS URL", extra={
-                "request_id": request_id,
-                "blob_name": blob_name,
-                "error_type": type(e).__name__,
-                "error": str(e)
-            }, exc_info=True)
+            logger.error(
+                "Unexpected error generating SAS URL",
+                extra={
+                    "request_id": request_id,
+                    "blob_name": blob_name,
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
             raise AzureError(f"Failed to generate SAS URL: {str(e)}")

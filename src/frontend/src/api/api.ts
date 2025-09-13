@@ -1,5 +1,6 @@
 import { EventSourceMessage, fetchEventSource } from "@microsoft/fetch-event-source";
 
+import { getSessionHeaders } from "./enhanced-api";
 import { SearchConfig } from "../components/search/SearchSettings/SearchSettings";
 import { TIMEOUTS } from "../constants/app";
 import { buildApiUrl } from "../utils/api-config";
@@ -47,7 +48,8 @@ const sendChatApi = async (
     await fetchEventSource(endpoint, {
         openWhenHidden: true,
         method: "POST",
-        body: JSON.stringify({ query: message, request_id: requestId, chatThread: chatThread, config }),
+    headers: { 'Content-Type': 'application/json', ...getSessionHeaders() },
+    body: JSON.stringify({ query: message, request_id: requestId, chatThread: chatThread, config }),
         signal: controller.signal,
         onerror: enhancedErrorHandler,
         onmessage: enhancedMessageHandler
@@ -55,7 +57,9 @@ const sendChatApi = async (
 };
 
 const listIndexes = async () => {
-    const response = await fetch(buildApiUrl("list_indexes"));
+    const response = await fetch(buildApiUrl("list_indexes"), {
+        headers: { ...getSessionHeaders() }
+    });
 
     return await response.json();
 };
@@ -63,6 +67,7 @@ const listIndexes = async () => {
 const getCitationDocument = async (fileName: string) => {
     const response = await fetch(buildApiUrl("get_citation_doc"), {
         method: "POST",
+        headers: { 'Content-Type': 'application/json', ...getSessionHeaders() },
         body: JSON.stringify({ fileName })
     });
 
@@ -73,7 +78,7 @@ const deleteIndex = async () => {
     const tryCall = async (path: string) => {
         const res = await fetch(buildApiUrl(path), {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getSessionHeaders() },
             body: JSON.stringify({ cascade: true })
         });
         const raw = await res.text();

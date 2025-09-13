@@ -292,6 +292,13 @@ class RagBase(ABC):
                 "Cache-Control": "no-cache, no-transform",
             },
         )
+        # Attach the original request to the response so downstream code can access
+        # per-request context (e.g., session auth_mode) while processing the stream.
+        try:
+            setattr(response, '_orig_request', request)
+        except Exception:
+            # best-effort; don't break response creation
+            pass
         await response.prepare(request)
         return response
 
