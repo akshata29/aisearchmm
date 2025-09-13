@@ -18,7 +18,7 @@ import useConfig from "../hooks/useConfig";
 import { INTRO_TITLE } from "@/constants";
 
 function AppContent() {
-    const { config, setConfig, indexes } = useConfig();
+    const { config, setConfig } = useConfig();
     const { thread, processingStepsMessage, chats, isLoading, handleQuery, onNewChat } = useChat(config);
     const { darkMode, setDarkMode } = useTheme();
     const [newQ, setnewQ] = useState(false);
@@ -70,7 +70,6 @@ function AppContent() {
                         <>
                             <NavBar 
                                 config={config} 
-                                indexes={indexes} 
                                 setConfig={setConfig} 
                                 onNewChat={onNewChat} 
                                 chats={Object.values(chats || {})} 

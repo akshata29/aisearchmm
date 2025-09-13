@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { listIndexes } from "../api/api";
+import { useState } from "react";
 import { OpenAIAPIMode } from "../api/models";
 import { SearchConfig } from "../components/search/SearchSettings/SearchSettings";
 
@@ -31,16 +30,5 @@ export default function useConfig() {
         query_rewrite_count: 3
     });
 
-    const [indexes, setIndexes] = useState<string[]>([]);
-
-    useEffect(() => {
-        // const fetchIndexes = async () => {
-        //     const indexes = await listIndexes();
-        //     setIndexes(indexes);
-        // };
-
-        // fetchIndexes();
-    }, []);
-
-    return { config, setConfig, indexes };
+    return { config, setConfig };
 }

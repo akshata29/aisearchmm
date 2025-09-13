@@ -10,7 +10,6 @@ import SearchSettings, { SearchConfig } from "../../search/SearchSettings/Search
 
 interface Props {
     config: SearchConfig;
-    indexes: string[];
     chats: Chat[];
     onNewChat: () => void;
     setConfig: Dispatch<SetStateAction<SearchConfig>>;
