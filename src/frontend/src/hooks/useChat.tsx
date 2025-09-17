@@ -22,17 +22,27 @@ export default function useChat(config: SearchConfig) {
         try {
             if (!chatId) setChatId(request_id);
 
-            const chatThread = thread
-                .filter(message => message.role === "user" || message.role === "assistant")
-                .map(msg => ({
-                    role: msg.role,
-                    content: [
-                        {
-                            text: msg.role === "assistant" ? msg.answerPartial?.answer : msg.message,
-                            type: "text"
-                        }
-                    ]
-                }));
+            // Create chat thread based on history setting
+            let chatThread: any[];
+            if (config.use_chat_history) {
+                // Use last 10 chat conversations (Q&A pairs) for context
+                const lastMessages = thread
+                    .filter(message => message.role === "user" || message.role === "assistant")
+                    .slice(-20) // Get last 20 messages (approximately 10 Q&A pairs)
+                    .map(msg => ({
+                        role: msg.role,
+                        content: [
+                            {
+                                text: msg.role === "assistant" ? msg.answerPartial?.answer : msg.message,
+                                type: "text"
+                            }
+                        ]
+                    }));
+                chatThread = lastMessages;
+            } else {
+                // Only use current query without history
+                chatThread = [];
+            }
 
             setThread(prevThread => {
                 const newThread = [...prevThread, { request_id, type: ThreadType.Message, message: query, role: RoleType.User }];

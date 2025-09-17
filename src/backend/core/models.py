@@ -10,6 +10,11 @@ class SearchConfig(TypedDict):
     use_semantic_ranker: bool = False
     use_streaming: bool = False
     use_knowledge_agent: bool = False
+    use_chat_history: Optional[bool] = False  # Enable chat history for context-aware responses
+    
+    # Custom prompts
+    custom_search_query_prompt: Optional[str] = None  # Custom search query generation prompt
+    custom_system_prompt: Optional[str] = None  # Custom system prompt for RAG
     
     # Enhanced Knowledge Agent options
     recency_preference_days: Optional[int] = 90  # Boost documents within this many days

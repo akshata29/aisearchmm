@@ -211,9 +211,21 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                     self.azure_openai_searchagent_model,
                 )
             if processing_step_callback:
+                # Check chat history mode for the message
+                use_chat_history = options.get("use_chat_history", False)
+                chat_history_info = f"with chat history ({len(chat_thread[-10:])} msgs)" if use_chat_history else "current query only"
+                
                 # Combined setup and configuration message
                 setup_msg = "🔎 Knowledge Agent Setup & Configuration\n"
-                setup_msg += "• Building retrieval request with chat history\n"
+                setup_msg += f"• Building retrieval request {chat_history_info}\n"
+                
+                # Show document type filtering information
+                preferred_doc_types = options.get("preferred_document_types", [])
+                if preferred_doc_types:
+                    type_names = []
+                    for doc_type in preferred_doc_types:
+                        type_names.append(doc_type.replace("_", " ").title())
+                    setup_msg += f"• Document types: {', '.join(type_names)}\n"
                 
                 # Build enhanced filter for prioritization
                 filter_expression = self._build_enhanced_filter(options)
@@ -232,17 +244,35 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                 # Determine reranker parameters based on query complexity
                 reranker_params = self._determine_reranker_params(options)
                 
+            # Check if chat history should be used for context
+            use_chat_history = options.get("use_chat_history", False)
+            
             # Build messages in the correct format for agentic retrieval
             messages = []
             
-            # Add chat history (limit to last 10 messages for performance)
-            for msg in chat_thread[-10:]:
-                messages.append(
-                    KnowledgeAgentMessage(
-                        role=msg["role"],
-                        content=[KnowledgeAgentMessageTextContent(text=msg["content"])]
+            if use_chat_history:
+                # Add chat history (limit to last 10 messages for performance)
+                for msg in chat_thread[-10:]:
+                    # Extract text content from MessageContent list if needed
+                    if isinstance(msg.get("content"), list):
+                        # Extract text from MessageContent list
+                        text_content = ""
+                        for content_item in msg["content"]:
+                            if content_item.get("type") == "text":
+                                text_content += content_item.get("text", "")
+                    else:
+                        # Content is already a string
+                        text_content = msg.get("content", "")
+                    
+                    messages.append(
+                        KnowledgeAgentMessage(
+                            role=msg["role"],
+                            content=[KnowledgeAgentMessageTextContent(text=text_content)]
+                        )
                     )
-                )
+                logger.info(f"Knowledge Agent using chat history: {len(chat_thread[-10:])} previous messages")
+            else:
+                logger.info("Knowledge Agent using only current message (chat history disabled)")
             
             # Add current user message
             messages.append(

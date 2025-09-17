@@ -51,6 +51,10 @@ class RagBase(ABC):
             use_semantic_ranker=config_dict.get("use_semantic_ranker", False),
             use_streaming=config_dict.get("use_streaming", False),
             use_knowledge_agent=config_dict.get("use_knowledge_agent", False),
+            use_chat_history=config_dict.get("use_chat_history", False),
+            # Custom prompts
+            custom_search_query_prompt=config_dict.get("custom_search_query_prompt"),
+            custom_system_prompt=config_dict.get("custom_system_prompt"),
             # Enhanced Knowledge Agent configurations
             recency_preference_days=config_dict.get("recency_preference_days", 90),
             query_complexity=config_dict.get("query_complexity", "medium"),

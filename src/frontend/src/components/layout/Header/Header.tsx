@@ -1,5 +1,7 @@
 import { Divider, Switch, Title2 } from "@fluentui/react-components";
 import { CopyRegular } from '@fluentui/react-icons';
+import { SearchConfig } from "../../search/SearchSettings/SearchSettings";
+import PromptCustomization from "../../shared/PromptCustomization/PromptCustomization";
 
 import "./Header.css";
 
@@ -7,9 +9,11 @@ interface Props {
     toggleMode: (mode: boolean) => void;
     darkMode: boolean;
     isAdmin?: boolean;
+    config: SearchConfig;
+    setConfig: (config: SearchConfig) => void;
 }
 
-export const Header = ({ toggleMode, darkMode, isAdmin: propIsAdmin }: Props) => {
+export const Header = ({ toggleMode, darkMode, isAdmin: propIsAdmin, config, setConfig }: Props) => {
     // read session and MI state from localStorage (best-effort)
     const getSessionId = () => {
         try { return localStorage.getItem('session_id') || ''; } catch(e) { return ''; }
@@ -51,6 +55,27 @@ export const Header = ({ toggleMode, darkMode, isAdmin: propIsAdmin }: Props) =>
         }
     };
 
+    const onToggleHistory = (_: any, ev: any) => {
+        try { 
+            localStorage.setItem('use_chat_history', ev.checked ? 'true' : 'false'); 
+            
+            // Update the config state immediately
+            setConfig({
+                ...config,
+                use_chat_history: ev.checked
+            });
+            
+            console.info('Chat history mode changed:', ev.checked ? 'enabled' : 'disabled');
+        } catch(e) {}
+
+        // Show a small toast notification
+        const toast = document.createElement('div');
+        toast.className = 'mi-toast';
+        toast.textContent = `Chat history ${ev.checked ? 'enabled' : 'disabled'}`;
+        document.body.appendChild(toast);
+        setTimeout(() => { try { toast.remove(); } catch(e) {} }, 2000);
+    };
+
     const copySessionToClipboard = async () => {
         try {
             const sid = getSessionId();
@@ -77,6 +102,7 @@ export const Header = ({ toggleMode, darkMode, isAdmin: propIsAdmin }: Props) =>
                         <span className="session-text">{sessionId ? `${sessionId}` : 'no-session'}</span>
                         <button className="copy-btn" onClick={copySessionToClipboard} aria-label="Copy session id"><CopyRegular /></button>
                         <span className={`mi-indicator ${miState ? 'on' : 'off'}`}>{miState ? 'MI: on' : 'MI: off'}</span>
+                        <span className={`mi-indicator ${config.use_chat_history ? 'on' : 'off'}`}>{config.use_chat_history ? 'HIST: on' : 'HIST: off'}</span>
                         <span className={`admin-indicator ${isAdmin ? 'admin' : 'user'}`}>{isAdmin ? 'ADMIN' : 'USER'}</span>
                     </div>
 
@@ -89,9 +115,20 @@ export const Header = ({ toggleMode, darkMode, isAdmin: propIsAdmin }: Props) =>
                     />
                     <div style={{ width: 12 }} />
                     <Switch
+                        checked={Boolean(config.use_chat_history)}
+                        label={`History`}
+                        onChange={onToggleHistory}
+                    />
+                    <div style={{ width: 12 }} />
+                    <Switch
                         checked={miState}
                         label={`Use Managed Identity`}
                         onChange={onToggleMi}
+                    />
+                    <div style={{ width: 12 }} />
+                    <PromptCustomization 
+                        config={config}
+                        setConfig={setConfig}
                     />
                 </div>
             </div>

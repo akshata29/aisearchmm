@@ -47,9 +47,11 @@ export function getSessionHeaders(): Record<string, string> {
     ensureSession();
     const sessionId = localStorage.getItem('session_id') || '';
     const useMi = localStorage.getItem('use_managed_identity') === 'true' ? 'true' : 'false';
+    const useHistory = localStorage.getItem('use_chat_history') === 'true' ? 'true' : 'false';
     return {
         'X-Session-Id': sessionId,
         'X-Use-Managed-Identity': useMi,
+        'X-Use-Chat-History': useHistory,
     };
 }
 

@@ -56,11 +56,16 @@ class SearchGroundingRetriever(GroundingRetriever):
             await processing_step_callback("Generating search query...")
         
         logger.info("Generating search query")
-        query = await self._generate_search_query(user_message, chat_thread)
+        query = await self._generate_search_query(user_message, chat_thread, options)
         logger.info(f"Generated search query: {query}")
 
         if processing_step_callback:
             await processing_step_callback(f"Generated search query: {query}")
+            
+            # Show chat history mode status
+            use_chat_history = options.get("use_chat_history", False)
+            chat_history_info = f"with chat history ({len(chat_thread)} msgs)" if use_chat_history else "current query only"
+            await processing_step_callback(f"🔎 Search Grounding Mode: {chat_history_info}")
             
         # Validate search configuration and show warnings
         validation_warnings = self.data_model.validate_search_configuration(options)
@@ -245,17 +250,51 @@ class SearchGroundingRetriever(GroundingRetriever):
         }
 
     async def _generate_search_query(
-        self, user_message: str, chat_thread: List[Message]
+        self, user_message: str, chat_thread: List[Message], options: SearchConfig
     ) -> str:
         """Generate an optimized search query, with potential enhancements for hybrid search."""
         try:
-            messages = [
-                {"role": "user", "content": user_message},
-                *chat_thread,
-            ]
+            # Check if chat history should be used for context
+            use_chat_history = options.get("use_chat_history", False)
+            
+            if use_chat_history:
+                # Transform chat thread messages to OpenAI format
+                openai_messages = []
+                for msg in chat_thread:
+                    # Convert Message format to OpenAI format
+                    if isinstance(msg.get("content"), list):
+                        # Extract text from MessageContent list
+                        text_content = ""
+                        for content_item in msg["content"]:
+                            if content_item.get("type") == "text":
+                                text_content += content_item.get("text", "")
+                        openai_messages.append({
+                            "role": msg["role"],
+                            "content": text_content
+                        })
+                    else:
+                        # Already in correct format
+                        openai_messages.append(msg)
+                
+                # Include chat history for context-aware search query generation
+                # Put the current user message at the end
+                messages = [
+                    *openai_messages,
+                    {"role": "user", "content": user_message},
+                ]
+                logger.info(f"Using chat history for query generation: {len(chat_thread)} previous messages")
+            else:
+                # Use only the current user message for query generation
+                messages = [
+                    {"role": "user", "content": user_message},
+                ]
+                logger.info("Using only current message for query generation (chat history disabled)")
 
-            # Enhanced system prompt for better query generation
-            enhanced_system_prompt = SEARCH_QUERY_SYSTEM_PROMPT + """
+            logger.info(f"Updated messages to LLM for query generation: {messages}")
+            
+            # Use custom search query prompt if provided, otherwise use default
+            base_prompt = options.get("custom_search_query_prompt") or SEARCH_QUERY_SYSTEM_PROMPT
+            enhanced_system_prompt = base_prompt + """
 
 For hybrid search scenarios, focus on:
 - Key concepts and entities rather than stop words

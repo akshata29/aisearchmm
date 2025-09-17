@@ -62,7 +62,7 @@ function AppContent() {
     return (
         <FluentProvider theme={darkMode ? webDarkTheme : webLightTheme}>
             <div className="container">
-                <Header darkMode={darkMode} toggleMode={setDarkMode} isAdmin={effectiveIsAdmin} />
+                <Header darkMode={darkMode} toggleMode={setDarkMode} isAdmin={effectiveIsAdmin} config={config} setConfig={setConfig} />
                 <TabNavigation selectedTab={selectedTab} onTabSelect={handleTabSelect} isAdmin={effectiveIsAdmin} />
 
                 <div className="content-wrapper">

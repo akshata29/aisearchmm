@@ -6,7 +6,7 @@ from azure.search.documents.aio import SearchClient
 from azure.search.documents.agent import KnowledgeAgentRetrievalClient
 from azure.storage.blob import ContainerClient
 from openai import AsyncAzureOpenAI
-from typing import List
+from typing import List, Optional
 from retrieval.grounding_retriever import GroundingRetriever
 from retrieval.knowledge_agent import KnowledgeAgentGrounding
 from utils.helpers import get_blob_as_base64
@@ -61,6 +61,23 @@ class MultimodalRag(RagBase):
             request_id,
             response,
             ProcessingStep(title="Search config", type="code", content=search_config),
+        )
+
+        # Add processing step to show chat history mode
+        history_mode = "enabled" if search_config.get("use_chat_history", False) else "disabled"
+        await self._send_processing_step_message(
+            request_id,
+            response,
+            ProcessingStep(
+                title="Chat History Mode",
+                type="info",
+                description=f"Chat history context is {history_mode}",
+                content={
+                    "use_chat_history": search_config.get("use_chat_history", False),
+                    "chat_thread_length": len(chat_thread) if chat_thread else 0,
+                    "mode_description": "Using conversation history for context-aware responses" if search_config.get("use_chat_history", False) else "Using only current question for search"
+                }
+            ),
         )
 
         grounding_results = None
@@ -220,7 +237,7 @@ class MultimodalRag(RagBase):
 
         try:
             messages = await self.prepare_llm_messages(
-                grounding_results, chat_thread, user_message
+                grounding_results, chat_thread, user_message, search_config
             )
 
             await self._formulate_response(
@@ -335,6 +352,7 @@ class MultimodalRag(RagBase):
         grounding_results: GroundingResults,
         chat_thread: List[Message],
         search_text: str,
+        search_config: Optional[dict] = None,
     ):
         logger.info("Preparing LLM messages")
         try:
@@ -384,10 +402,15 @@ class MultimodalRag(RagBase):
                         }
                     )
 
+            # Use custom system prompt if provided, otherwise use default
+            system_prompt = search_config.get("custom_system_prompt") if search_config else None
+            if not system_prompt:
+                system_prompt = SYSTEM_PROMPT_NO_META_DATA
+
             return [
                 {
                     "role": "system",
-                    "content": [{"text": SYSTEM_PROMPT_NO_META_DATA, "type": "text"}],
+                    "content": [{"text": system_prompt, "type": "text"}],
                 },
                 *chat_thread,
                 {"role": "user", "content": [{"text": search_text, "type": "text"}]},

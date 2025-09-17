@@ -31,6 +31,11 @@ export interface SearchConfig {
     openai_api_mode: OpenAIAPIMode;
     use_streaming: boolean;
     use_knowledge_agent: boolean;
+    use_chat_history?: boolean;  // Enable chat history for context-aware responses
+    
+    // Custom prompts
+    custom_search_query_prompt?: string;  // Custom search query generation prompt
+    custom_system_prompt?: string;  // Custom system prompt for RAG
     
     // Enhanced Knowledge Agent options
     recency_preference_days?: number;  // Boost documents within this many days
