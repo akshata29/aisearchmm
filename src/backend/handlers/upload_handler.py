@@ -692,26 +692,9 @@ class SimpleDocumentUploadHandler:
                             except Exception as e:
                                 logger.warning(f"Could not parse {prop_name} date '{value_str}': {e}")
                                 metadata[prop_name] = value_str
-                        elif prop_name == 'document_type':
-                            # Map document type values
-                            type_mapping = {
-                                'nvp': 'nyp_columns',
-                                'nvp_columns': 'nyp_columns',
-                                'nyp_columns': 'nyp_columns',
-                                'nl': 'newsletter',
-                                'newsletter': 'newsletter',
-                                'otq': 'otq',
-                                'only_three_questions': 'otq',
-                                'client_reviews': 'client_reviews',
-                                'review': 'client_reviews',
-                                'book': 'book',
-                                'nyp': 'Nyp, Nl',
-                                'nl': 'Nyp, Nl',
-                                'cr': 'cr'
-                            }
-                            
+                        elif prop_name == 'document_type':                            
                             normalized_type = value_str.lower().strip()
-                            metadata[prop_name] = type_mapping.get(normalized_type, normalized_type)
+                            metadata[prop_name] = normalized_type
                 
                 logger.info(f"Extracted PDF metadata: {metadata}")
             else:
@@ -842,7 +825,7 @@ class SimpleDocumentUploadHandler:
             search_results = await self.clients['search'].search(
                 search_text="*",
                 select=["document_type"],
-                top=1000  # Get a large sample to find all types
+                top=50000  # Get a large sample to find all types
             )
             
             # Extract unique document types from search results
@@ -854,13 +837,14 @@ class SimpleDocumentUploadHandler:
             
             # Convert to list
             document_types = list(document_types)
+            logger.info(f"Found {len(document_types)} unique document types from search index")
+            logger.info(f"Document types: {document_types}")
             
             # Add default types that should always be available (even if no documents exist yet)
             default_types = [
                 'quarterly_report', 'newsletter', 'articles', 'annual_report',
                 'financial_statement', 'presentation', 'whitepaper', 'research_report',
-                'policy_document', 'manual', 'guide', 'client_reviews', 'nyp_columns',
-                'otq', 'other', 'book', 'Nyp, Nl', 'cr'
+                'policy_document', 'manual', 'guide', 'other'
             ]
             
             # Combine and deduplicate
@@ -880,9 +864,6 @@ class SimpleDocumentUploadHandler:
                 'policy_document': 'Policy Document',
                 'manual': 'Manual',
                 'guide': 'Guide',
-                'cr': 'Client Reviews',
-                'Nyp, Nl': 'NYP Columns',
-                'book': 'Only Three Questions',
                 'other': 'Other'
             }
             

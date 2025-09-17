@@ -158,8 +158,7 @@ class ProcessFile:
             known_types = {
                 "quarterly_report", "newsletter", "articles", "annual_report", 
                 "financial_statement", "presentation", "whitepaper", "research_report", 
-                "policy_document", "manual", "guide", "client_reviews", "nyp_columns", 
-                "otq", "other", "book", "Nyp, Nl", "cr"
+                "policy_document", "manual", "guide", "other"
             }
             
             # Use the extracted/provided type as-is, but log if it's unknown
@@ -249,25 +248,8 @@ class ProcessFile:
                                 print(f"Warning: Could not parse {prop_name} date '{value_str}': {e}")
                                 metadata[prop_name] = value_str
                         elif prop_name == 'document_type':
-                            # Map document type values
-                            type_mapping = {
-                                'nvp': 'nyp_columns',
-                                'nvp_columns': 'nyp_columns',
-                                'nyp_columns': 'nyp_columns',
-                                'nl': 'newsletter',
-                                'newsletter': 'newsletter',
-                                'otq': 'otq',
-                                'only_three_questions': 'otq',
-                                'client_reviews': 'client_reviews',
-                                'review': 'client_reviews',
-                                'book': 'book',
-                                'nyp': 'Nyp, Nl',
-                                'nl': 'Nyp, Nl',
-                                'cr': 'cr'
-                            }
-                            
                             normalized_type = value_str.lower().strip()
-                            metadata[prop_name] = type_mapping.get(normalized_type, normalized_type)
+                            metadata[prop_name] = normalized_type
                 
                 print(f"Extracted PDF metadata: {metadata}")
                 

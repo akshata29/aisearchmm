@@ -66,9 +66,6 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
         { key: 'policy_document', text: 'Policy Document' },
         { key: 'manual', text: 'Manual' },
         { key: 'guide', text: 'Guide' },
-        { key: 'cr', text: 'Client Reviews' },
-        { key: 'Nyp, Nl', text: 'NYP Columns' },
-        { key: 'book', text: 'Only Three Questions' },
         { key: 'other', text: 'Other' }
     ]);
 
@@ -136,7 +133,6 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     };
 
     const handleDocumentTypesChange = (newTypes: string[]) => {
-        // Ensure proper ordering: book, nyp, Nl, cr first, then others
         const orderedTypes = orderDocumentTypes(newTypes);
         setConfig(prev => ({
             ...prev,
@@ -145,19 +141,11 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
     };
 
     const orderDocumentTypes = (types: string[]): string[] => {
-        const priorityOrder = ["book", "Nyp,Nl", "cr"];
         const orderedTypes: string[] = [];
-        
-        // Add priority types first if they exist in the list
-        for (const priorityType of priorityOrder) {
-            if (types.includes(priorityType)) {
-                orderedTypes.push(priorityType);
-            }
-        }
-        
+                
         // Add remaining types that are not in priority list
         for (const docType of types) {
-            if (!priorityOrder.includes(docType) && !orderedTypes.includes(docType)) {
+            if (!orderedTypes.includes(docType)) {
                 orderedTypes.push(docType);
             }
         }
@@ -183,13 +171,6 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
             handleDocumentTypesChange([...currentTypes, selectedKey]);
         }
     };
-
-    // Ensure default document types are set if none exist
-    React.useEffect(() => {
-        if (!config.preferred_document_types || config.preferred_document_types.length === 0) {
-            handleDocumentTypesChange(["book", "Nyp,Nl", "cr"]);
-        }
-    }, []);
 
     return (
         <div className="input-container">
@@ -295,8 +276,8 @@ const SearchSettings: React.FC<Props> = ({ config, setConfig }) => {
                 </Dropdown>
                 <Text size={200} style={{ fontSize: "11px", color: "var(--colorNeutralForeground3)", marginTop: "4px" }}>
                     {config.use_knowledge_agent 
-                        ? "Select document types to prioritize in search results. Defaults to: Only Three Questions, NYP Columns, Client Reviews." 
-                        : "Select document types to filter and prioritize in search results. Defaults to: Only Three Questions, NYP Columns, Client Reviews."}
+                        ? "Select document types to prioritize in search results." 
+                        : "Select document types to filter and prioritize in search results."}
                 </Text>
                 <Input
                     placeholder="Or type custom document type and press Enter"

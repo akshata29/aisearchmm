@@ -4,21 +4,21 @@ import { SearchConfig } from "../components/search/SearchSettings/SearchSettings
 
 export default function useConfig() {
     const [config, setConfig] = useState<SearchConfig>({
-        use_semantic_ranker: false,
-        chunk_count: 10,
+        use_semantic_ranker: true,
+        chunk_count: 50,
         openai_api_mode: OpenAIAPIMode.ChatCompletions,
         use_streaming: true,
-        use_knowledge_agent: true,
+        use_knowledge_agent: false,
         
         // Enhanced Knowledge Agent options with defaults
         recency_preference_days: 90,
         query_complexity: "medium",
-        preferred_document_types: [],
+        preferred_document_types: ["book", "nyp, nl", "cr"],
         enable_post_processing_boost: true,
         additional_filters: [],
         
         // Hybrid Search Configuration defaults (when not using Knowledge Agent)
-        use_hybrid_search: false,
+        use_hybrid_search: true,
         use_query_rewriting: false,
         use_scoring_profile: true,  // Enable scoring profile by default for freshness boosting
         scoring_profile_name: "freshness_and_type_boost",

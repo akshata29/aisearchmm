@@ -71,31 +71,11 @@ class SearchGroundingRetriever(GroundingRetriever):
         try:
             # Log document type filtering information
             preferred_doc_types = options.get("preferred_document_types", [])
-            if not preferred_doc_types:
-                logger.info("Search grounding: Using default document types: book, Nyp, Nl, cr")
-                if processing_step_callback:
-                    await processing_step_callback("📋 Using default document types: Book, Nyp, Nl, Client Reviews")
-            else:
-                # Ensure proper ordering
-                ordered_doc_types = self._order_document_types(preferred_doc_types)
-                if ordered_doc_types != preferred_doc_types:
-                    # Update the options to use the properly ordered types
-                    options = {**options, "preferred_document_types": ordered_doc_types}
-                    logger.info(f"Search grounding: Reordered document types: {ordered_doc_types}")
-                else:
-                    logger.info(f"Search grounding: Filtering by document types: {preferred_doc_types}")
-                
+            if preferred_doc_types:
                 if processing_step_callback:
                     type_names = []
-                    for doc_type in ordered_doc_types:
-                        if doc_type == "book":
-                            type_names.append("Book")
-                        elif doc_type == "nyp":
-                            type_names.append("Nyp, Nl")
-                        elif doc_type == "cr":
-                            type_names.append("Client Reviews")
-                        else:
-                            type_names.append(doc_type.replace("_", " ").title())
+                    for doc_type in preferred_doc_types:
+                        type_names.append(doc_type.replace("_", " ").title())
                     await processing_step_callback(f"📋 Filtering document types: {', '.join(type_names)}")
 
             # Recreate payload with potentially updated options
@@ -657,20 +637,3 @@ For hybrid search scenarios, focus on:
                 ref = references[ref_id]
                 extracted_citations.append(self.data_model.extract_citation(ref))
         return extracted_citations
-
-    def _order_document_types(self, doc_types: List[str]) -> List[str]:
-        """Ensure document types follow the preferred order: book, nyp, Nl, cr, then others."""
-        priority_order = ["book", "nyp", "Nl", "cr"]
-        ordered_types = []
-        
-        # Add priority types first if they exist in the list
-        for priority_type in priority_order:
-            if priority_type in doc_types:
-                ordered_types.append(priority_type)
-        
-        # Add remaining types that are not in priority list
-        for doc_type in doc_types:
-            if doc_type not in priority_order and doc_type not in ordered_types:
-                ordered_types.append(doc_type)
-        
-        return ordered_types

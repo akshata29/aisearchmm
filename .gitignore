@@ -114,3 +114,5 @@ dmypy.json
 
 # local
 *.DS_Store
+
+src/backend/static*
