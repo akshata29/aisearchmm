@@ -21,7 +21,10 @@ export const API_ENDPOINTS = {
     UPLOAD_STATUS: buildApiUrl("upload_status"),
     PROCESS_DOCUMENT: buildApiUrl("process_document"),
     DELETE_INDEX: buildApiUrl("delete_index"),
-    ADMIN: buildApiUrl("api/admin")
+    ADMIN: buildApiUrl("api/admin"),
+    FEEDBACK_SUBMIT: buildApiUrl("api/feedback/submit"),
+    FEEDBACK_LIST: buildApiUrl("api/feedback/list"),
+    FEEDBACK_DETAIL: buildApiUrl("api/feedback"),
 } as const;
 
 // Default configurations

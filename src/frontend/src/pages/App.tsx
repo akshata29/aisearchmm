@@ -10,6 +10,7 @@ import SearchInput from "../components/search/SearchInput/SearchInput";
 import { TabNavigation } from "../components/layout/TabNavigation/TabNavigation";
 import ProfessionalDocumentUpload from "../components/upload/DocumentUpload/DocumentUpload";
 import Admin from "../components/admin/Admin";
+import FeedbackAdmin from "../components/FeedbackAdmin";
 import ProfessionalChatContent from "../components/chat/ChatContent/ChatContent";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { ThemeProvider, useTheme } from "../contexts";
@@ -84,6 +85,7 @@ function AppContent() {
                                                 thread={thread} 
                                                 processingStepMsg={processingStepsMessage} 
                                                 darkMode={darkMode} 
+                                                config={config}
                                             />
                                         ) : null}
                                     </>
@@ -118,6 +120,12 @@ function AppContent() {
                     ) : selectedTab === "upload" && isAdmin ? (
                         <ErrorBoundary>
                             <ProfessionalDocumentUpload />
+                        </ErrorBoundary>
+                    ) : selectedTab === "feedback" && isAdmin ? (
+                        <ErrorBoundary>
+                            <div className="admin-tab-container">
+                                <FeedbackAdmin />
+                            </div>
                         </ErrorBoundary>
                     ) : selectedTab === "admin" && isAdmin ? (
                         <ErrorBoundary>

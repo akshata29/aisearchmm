@@ -12,6 +12,11 @@ import type {
     StreamMessageHandler,
     StreamErrorHandler
 } from '@/types/api';
+import type { 
+    FeedbackSubmissionData, 
+    FeedbackEntry, 
+    FeedbackListResponse 
+} from './models';
 import type { SearchConfig } from '@/types/config';
 import { ApiError, logError } from '@/utils/errors';
 import { API_ENDPOINTS, TIMEOUTS } from '@/constants';
@@ -400,6 +405,86 @@ export async function getAdminData(): Promise<unknown> {
         return await apiRequest(API_ENDPOINTS.ADMIN);
     } catch (error) {
         logError(error, 'Admin API');
+        throw error;
+    }
+}
+
+/**
+ * Submit user feedback for a response
+ */
+export async function submitFeedback(feedbackData: FeedbackSubmissionData): Promise<{ status: string; feedback_id: string; operation_id: string }> {
+    try {
+        return await apiRequest(API_ENDPOINTS.FEEDBACK_SUBMIT, {
+            method: 'POST',
+            body: JSON.stringify(feedbackData),
+        });
+    } catch (error) {
+        logError(error, 'Submit Feedback API');
+        throw error;
+    }
+}
+
+/**
+ * Get paginated list of feedback entries (admin only)
+ */
+export async function getFeedbackList(params?: {
+    page?: number;
+    page_size?: number;
+    search?: string;
+    feedback_type?: string;
+    reviewed?: boolean;
+    sort_by?: string;
+    sort_order?: string;
+}): Promise<FeedbackListResponse> {
+    try {
+        const queryParams = new URLSearchParams();
+        if (params) {
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null) {
+                    queryParams.append(key, value.toString());
+                }
+            });
+        }
+        
+        const url = queryParams.toString() 
+            ? `${API_ENDPOINTS.FEEDBACK_LIST}?${queryParams}`
+            : API_ENDPOINTS.FEEDBACK_LIST;
+            
+        return await apiRequest<FeedbackListResponse>(url);
+    } catch (error) {
+        logError(error, 'Get Feedback List API');
+        throw error;
+    }
+}
+
+/**
+ * Get detailed feedback entry (admin only)
+ */
+export async function getFeedbackDetail(feedbackId: string): Promise<{ status: string; data: FeedbackEntry; operation_id: string }> {
+    try {
+        return await apiRequest(`${API_ENDPOINTS.FEEDBACK_DETAIL}/${feedbackId}`);
+    } catch (error) {
+        logError(error, 'Get Feedback Detail API');
+        throw error;
+    }
+}
+
+/**
+ * Update feedback entry (admin only)
+ */
+export async function updateFeedback(feedbackId: string, updateData: {
+    admin_notes?: string;
+    is_reviewed?: boolean;
+    response_text?: string;
+    modified_by?: string;
+}): Promise<{ status: string; data: FeedbackEntry; operation_id: string }> {
+    try {
+        return await apiRequest(`${API_ENDPOINTS.FEEDBACK_DETAIL}/${feedbackId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updateData),
+        });
+    } catch (error) {
+        logError(error, 'Update Feedback API');
         throw error;
     }
 }

@@ -22,6 +22,69 @@ body {
     padding-bottom: 100px; /* Make room for search footer */
 }
 
+/* Modern admin tab container with elegant scrolling */
+.admin-tab-container {
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+    scroll-behavior: smooth;
+    
+    /* Modern scrollbar styling */
+    scrollbar-width: thin;
+    scrollbar-color: var(--colorNeutralStroke2) transparent;
+}
+
+/* Webkit browsers (Chrome, Safari, Edge) - Modern thin scrollbar */
+.admin-tab-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.admin-tab-container::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 4px 0;
+}
+
+.admin-tab-container::-webkit-scrollbar-thumb {
+    background: var(--colorNeutralStroke2);
+    border-radius: 3px;
+    transition: all 0.2s ease;
+    opacity: 0.6;
+}
+
+.admin-tab-container::-webkit-scrollbar-thumb:hover {
+    background: var(--colorNeutralStroke1);
+    opacity: 1;
+    width: 8px;
+}
+
+.admin-tab-container::-webkit-scrollbar-thumb:active {
+    background: var(--colorNeutralForeground3);
+}
+
+/* Subtle scroll indicators */
+.admin-tab-container::before,
+.admin-tab-container::after {
+    content: '';
+    position: fixed;
+    left: 0;
+    right: 18px; /* Account for scrollbar */
+    height: 20px;
+    pointer-events: none;
+    z-index: 10;
+    transition: opacity 0.3s ease;
+}
+
+.admin-tab-container::before {
+    top: 58px; /* Header height */
+    background: linear-gradient(180deg, var(--colorNeutralBackground1) 0%, transparent 100%);
+}
+
+.admin-tab-container::after {
+    bottom: 0;
+    background: linear-gradient(0deg, var(--colorNeutralBackground1) 0%, transparent 100%);
+}
+
 .search-footer {
     position: absolute;
     bottom: 20px;

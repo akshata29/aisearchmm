@@ -33,19 +33,22 @@ import {
     MoreHorizontal20Regular
 } from "@fluentui/react-icons";
 
-import { ProcessingStepsMessage, RoleType, Thread, ThreadType, Citation } from "../../../api/models";
+import { ProcessingStepsMessage, RoleType, Thread, ThreadType, Citation, FeedbackSubmissionData } from "../../../api/models";
 import "./ChatContent.css";
 import Citations from "../Citations/Citations";
 import CitationViewer from "../CitationViewer/CitationViewer";
 import ProcessingSteps from "../ProcessingSteps/ProcessingSteps";
+import { submitFeedback } from "../../../api/enhanced-api";
+import { getSessionHeaders } from "../../../api/enhanced-api";
 
 interface Props {
     processingStepMsg: Record<string, ProcessingStepsMessage[]>;
     thread: Thread[];
     darkMode?: boolean;
+    config?: any; // Search configuration
 }
 
-const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, darkMode = false }) => {
+const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, darkMode = false, config = {} }) => {
     const [showProcessingSteps, setShowProcessingSteps] = useState(false);
     const [processRequestId, setProcessRequestId] = useState("");
     const [highlightedCitation, setHighlightedCitation] = useState<string | undefined>();
@@ -55,6 +58,7 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
     const [likedMessages, setLikedMessages] = useState<Set<string>>(new Set());
     const [dislikedMessages, setDislikedMessages] = useState<Set<string>>(new Set());
     const [isTyping, setIsTyping] = useState(false);
+    const [feedbackSubmitting, setFeedbackSubmitting] = useState<Set<string>>(new Set());
 
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const messageToBeCopied: Record<string, string> = {};
@@ -112,11 +116,19 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
             const allCitations = [...textCitations, ...imageCitations];
             
             const handleCitationClick = (citationId: string) => {
+                console.log("Citation clicked:", citationId);
+                console.log("Available citations:", allCitations.map(c => c.content_id));
+                
                 // Find the citation by content_id
                 const citation = allCitations.find(c => c.content_id === citationId);
+                console.log("Found citation:", citation);
+                
                 if (citation) {
                     setSelectedCitation(citation);
                     setShowCitationViewer(true);
+                    console.log("Citation viewer should now be visible");
+                } else {
+                    console.warn("Citation not found for ID:", citationId);
                 }
             };
             
@@ -247,7 +259,10 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
         }, 2000);
     };
 
-    const handleLikeMessage = (requestId: string) => {
+    const handleLikeMessage = async (requestId: string) => {
+        const wasLiked = likedMessages.has(requestId);
+        
+        // Update UI state first for immediate feedback
         setLikedMessages(prev => {
             const newSet = new Set(prev);
             if (newSet.has(requestId)) {
@@ -263,9 +278,17 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
             }
             return newSet;
         });
+
+        // Only submit feedback when giving thumbs up (not when removing it)
+        if (!wasLiked) {
+            await submitMessageFeedback(requestId, "thumbs_up");
+        }
     };
 
-    const handleDislikeMessage = (requestId: string) => {
+    const handleDislikeMessage = async (requestId: string) => {
+        const wasDisliked = dislikedMessages.has(requestId);
+        
+        // Update UI state first for immediate feedback
         setDislikedMessages(prev => {
             const newSet = new Set(prev);
             if (newSet.has(requestId)) {
@@ -281,6 +304,84 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
             }
             return newSet;
         });
+
+        // Only submit feedback when giving thumbs down (not when removing it)
+        if (!wasDisliked) {
+            await submitMessageFeedback(requestId, "thumbs_down");
+        }
+    };
+
+    const submitMessageFeedback = async (requestId: string, feedbackType: "thumbs_up" | "thumbs_down") => {
+        try {
+            setFeedbackSubmitting(prev => new Set(prev).add(requestId));
+
+            // Find the conversation group for this request
+            const conversationGroup = thread.filter(msg => msg.request_id === requestId);
+            if (conversationGroup.length === 0) {
+                console.warn("No messages found for request ID:", requestId);
+                return;
+            }
+
+            // Find the user question and assistant response
+            const userMessage = conversationGroup.find(msg => msg.role === RoleType.User);
+            const assistantMessage = conversationGroup.find(msg => msg.role === RoleType.Assistant && msg.type === ThreadType.Answer);
+
+            if (!userMessage || !assistantMessage) {
+                console.warn("Could not find user question or assistant response for request ID:", requestId);
+                return;
+            }
+
+            // Get session ID
+            const sessionHeaders = getSessionHeaders();
+            const sessionId = sessionHeaders['X-Session-Id'] || 'anonymous';
+
+            // Collect citations
+            const citationMessages = conversationGroup.filter(msg => msg.type === ThreadType.Citation);
+            const textCitations = citationMessages.length > 0 ? citationMessages[0]?.textCitations || [] : [];
+            const imageCitations = citationMessages.length > 0 ? citationMessages[0]?.imageCitations || [] : [];
+
+            // Collect processing steps
+            const processingSteps = findProcessingStepsForMessage(assistantMessage);
+            const steps = processingSteps?.map(step => ({
+                step_id: step.message_id || `step_${Date.now()}`,
+                step_type: (step.processingStep?.type as string) || "text",
+                title: step.processingStep?.title || "",
+                description: step.processingStep?.description || undefined,
+                status: "completed" as string,
+                details: step.processingStep?.content ? { content: step.processingStep.content } : undefined
+            })) || [];
+
+            // Prepare feedback data
+            const feedbackData: FeedbackSubmissionData = {
+                request_id: requestId,
+                session_id: sessionId,
+                feedback_type: feedbackType,
+                question: userMessage.message || "",
+                response: assistantMessage.answerPartial?.answer || "",
+                text_citations: textCitations,
+                image_citations: imageCitations,
+                processing_steps: steps,
+                search_config: config
+            };
+
+            console.log("Submitting feedback:", feedbackData);
+
+            const result = await submitFeedback(feedbackData);
+            console.log("Feedback submitted successfully:", result);
+
+        } catch (error) {
+            console.error("Failed to submit feedback:", error);
+            
+            // Optionally show user notification about failure
+            // You could implement a toast notification here
+            
+        } finally {
+            setFeedbackSubmitting(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(requestId);
+                return newSet;
+            });
+        }
     };
 
     const formatTimestamp = () => {
@@ -333,6 +434,7 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                                     const isCopied = copiedMessages.has(message.request_id);
                                     const isLiked = likedMessages.has(message.request_id);
                                     const isDisliked = dislikedMessages.has(message.request_id);
+                                    const isFeedbackSubmitting = feedbackSubmitting.has(message.request_id);
 
                                 return (
                                     <div 
@@ -600,9 +702,10 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                                                                 <Tooltip content={isLiked ? "Remove like" : "Like response"} relationship="label">
                                                                     <Button
                                                                         size="small"
-                                                                        icon={<ThumbLike20Regular />}
+                                                                        icon={isFeedbackSubmitting ? <Spinner size="tiny" /> : <ThumbLike20Regular />}
                                                                         appearance="subtle"
                                                                         className={`feedback-button ${isLiked ? "liked" : ""}`}
+                                                                        disabled={isFeedbackSubmitting}
                                                                         onClick={() => handleLikeMessage(message.request_id)}
                                                                     />
                                                                 </Tooltip>
@@ -610,9 +713,10 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                                                                 <Tooltip content={isDisliked ? "Remove dislike" : "Dislike response"} relationship="label">
                                                                     <Button
                                                                         size="small"
-                                                                        icon={<ThumbDislike20Regular />}
+                                                                        icon={isFeedbackSubmitting ? <Spinner size="tiny" /> : <ThumbDislike20Regular />}
                                                                         appearance="subtle"
                                                                         className={`feedback-button ${isDisliked ? "disliked" : ""}`}
+                                                                        disabled={isFeedbackSubmitting}
                                                                         onClick={() => handleDislikeMessage(message.request_id)}
                                                                     />
                                                                 </Tooltip>
@@ -666,12 +770,16 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
             {showCitationViewer && selectedCitation && (
                 <CitationViewer
                     citation={selectedCitation}
+                    show={showCitationViewer}
+                    toggle={() => {
+                        setShowCitationViewer(false);
+                        setSelectedCitation(undefined);
+                    }}
                     onClose={() => {
                         setShowCitationViewer(false);
                         setSelectedCitation(undefined);
-                    } } show={false} toggle={function (): void {
-                        throw new Error("Function not implemented.");
-                    } }                />
+                    }}
+                />
             )}
         </div>
     );

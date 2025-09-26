@@ -19,10 +19,13 @@ interface Props {
 export const NavBar = ({ setConfig, onNewChat, config, isAdmin: propIsAdmin }: Props) => {
     const injected = Boolean(window.__RUNTIME_CONFIG__?.['IS_ADMIN'] === true || window.__RUNTIME_CONFIG__?.['IS_ADMIN'] === 'true');
     const isAdmin = typeof propIsAdmin === 'boolean' ? propIsAdmin : injected;
-    // For admin sessions, keep settings expanded by default. Non-admins start collapsed.
+    // For admin sessions, keep settings expanded by default. Non-admins start collapsed since they have no settings to show.
     const [isOpen, setIsOpen] = useState(Boolean(isAdmin));
 
     const getToolTipContent = () => {
+        if (!isAdmin) {
+            return isOpen ? "Close Menu" : "Open Menu";
+        }
         return isOpen ? "Close Settings" : "Open Settings";
     };
 
@@ -33,12 +36,14 @@ export const NavBar = ({ setConfig, onNewChat, config, isAdmin: propIsAdmin }: P
                     <Button appearance="secondary" icon={<ChatAddRegular />} className="custom-menu-item new-chat" onClick={onNewChat}>
                         New Chat
                     </Button>
-                    <div className="menu-item-settings">
-                        <NavSectionHeader>Search Settings</NavSectionHeader>
-                        <div className="custom-menu-item">
-                            <SearchSettings config={config} setConfig={setConfig} />
+                    {isAdmin && (
+                        <div className="menu-item-settings">
+                            <NavSectionHeader>Search Settings</NavSectionHeader>
+                            <div className="custom-menu-item">
+                                <SearchSettings config={config} setConfig={setConfig} />
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             </NavDrawer>
             <NavDrawerHeader style={{ width: "25px" }}>

@@ -54,6 +54,7 @@ from retrieval.multimodal_rag import MultimodalRag
 from core.data_model import DocumentPerChunkDataModel
 from handlers.citation_file_handler import CitationFilesHandler
 from handlers.upload_handler import upload_handler
+from handlers.feedback_handler import FeedbackHandler
 from constants import USER_AGENT
 
 # Import production-ready components
@@ -206,9 +207,16 @@ class ProductionApp:
                 blob_service_client, samples_container_client, artifacts_container_client
             )
             admin_handler = AdminHandler()
+            
+            # Initialize feedback handler
+            feedback_handler = FeedbackHandler(
+                search_index_client=index_client,
+                openai_client=openai_client,
+                embedding_deployment=self.config.azure_openai.embedding_deployment
+            )
 
             # Add routes
-            await self._setup_routes(app, index_client, citation_files_handler, admin_handler, search_client)
+            await self._setup_routes(app, index_client, citation_files_handler, admin_handler, search_client, feedback_handler)
 
             # Attach health check endpoints
             if self.config.monitoring.enable_health_checks:
@@ -295,7 +303,8 @@ class ProductionApp:
         index_client: SearchIndexClient,
         citation_files_handler: CitationFilesHandler,
         admin_handler: AdminHandler,
-        search_client: SearchClient
+        search_client: SearchClient,
+        feedback_handler: FeedbackHandler
     ) -> None:
         """Setup application routes with proper error handling."""
         try:
@@ -319,6 +328,9 @@ class ProductionApp:
             
             # Attach admin routes
             admin_handler.attach_to_app(app)
+            
+            # Attach feedback routes
+            feedback_handler.attach_to_app(app)
             
             # Add static file serving
             app.router.add_static("/", path=current_directory / "static", name="static")
