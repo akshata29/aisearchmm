@@ -67,13 +67,31 @@ export default function useChat(config: SearchConfig) {
                     } else if (message.event === "[END]") {
                         setIsLoading(false);
                     } else {
+                        console.log(`=== RECEIVED ${message.event.toUpperCase()} EVENT ===`, message);
+                        
                         const data = JSON.parse(message.data);
                         data.type = message.event;
 
+                        if (message.event === 'answer') {
+                            console.log('Answer event data:', {
+                                answerPartial: data.answerPartial,
+                                answerLength: data.answerPartial?.answer?.length || 0,
+                                answerPreview: data.answerPartial?.answer?.substring(0, 100) + '...'
+                            });
+                        }
+
                         setThread(prevThread => {
-                            const index = prevThread.findIndex(msg => msg.message_id === data.message_id);
+                            // Find by both message_id AND type to avoid overwriting answer with citation
+                            const index = prevThread.findIndex(msg => 
+                                msg.message_id === data.message_id && msg.type === data.type
+                            );
                             const newThread = index !== -1 ? [...prevThread] : [...prevThread, data];
-                            if (index !== -1) newThread[index] = data;
+                            if (index !== -1) {
+                                console.log(`Updating existing ${data.type} message:`, data.message_id);
+                                newThread[index] = data;
+                            } else {
+                                console.log(`Adding new ${data.type} message:`, data.message_id);
+                            }
 
                             newThread.sort((a, b) => new Date(a.request_id).getTime() - new Date(b.request_id).getTime());
                             refreshChats();

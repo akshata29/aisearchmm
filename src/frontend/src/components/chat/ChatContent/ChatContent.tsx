@@ -30,7 +30,8 @@ import {
     Share20Regular,
     ThumbLike20Regular,
     ThumbDislike20Regular,
-    MoreHorizontal20Regular
+    MoreHorizontal20Regular,
+    Flash20Regular
 } from "@fluentui/react-icons";
 
 import { ProcessingStepsMessage, RoleType, Thread, ThreadType, Citation, FeedbackSubmissionData } from "../../../api/models";
@@ -221,6 +222,22 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
 
         //console.log("DEBUG: No processing steps found");
         return null;
+    };
+
+    // Helper function to check if a response came from cache
+    const isResponseFromCache = (message: any): boolean => {
+        const processingSteps = findProcessingStepsForMessage(message);
+        if (!processingSteps || processingSteps.length === 0) {
+            return false;
+        }
+
+        // Look for "Cache hit" step in processing steps
+        return processingSteps.some(step => {
+            const title = step.processingStep?.title || "";
+            return title.toLowerCase().includes("cache hit") || 
+                   title.toLowerCase().includes("cached response") ||
+                   title.toLowerCase().includes("similar question found");
+        });
     };
 
     const getCurProcessingStep = (requestId: string): Record<string, ProcessingStepsMessage[]> => {
@@ -416,8 +433,13 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                 ) : (
                     <div className="chat-content-modern">
                         {messagesGroupedByRequestId.map((group, groupIndex) => {
+                        // DEBUG: Log the group to see what messages we have
+                        console.log(`=== MESSAGE GROUP ${groupIndex} ===`, group);
+                        
                         // Filter out citation messages since they should be part of the answer
                         const mainMessages = group.filter(msg => msg.type !== ThreadType.Citation);
+                        console.log('Main messages after filtering:', mainMessages);
+                        
                         // Find citation data from citation messages
                         const citationMessages = group.filter(msg => msg.type === ThreadType.Citation);
                         const imageCitations = citationMessages.length > 0 ? citationMessages[0]?.imageCitations || [] : [];
@@ -462,14 +484,28 @@ const ProfessionalChatContent: React.FC<Props> = ({ thread, processingStepMsg, d
                                                             {formatTimestamp()}
                                                         </Caption1>
                                                         {!isUser && message.type === ThreadType.Answer && (
-                                                            <Badge 
-                                                                color="success"
-                                                                appearance="tint"
-                                                                size="small"
-                                                                className="status-badge"
-                                                            >
-                                                                AI Response
-                                                            </Badge>
+                                                            <div className="response-badges">
+                                                                {isResponseFromCache(message) ? (
+                                                                    <Badge 
+                                                                        color="brand"
+                                                                        appearance="filled"
+                                                                        size="small"
+                                                                        className="status-badge cache-badge"
+                                                                        icon={<Flash20Regular />}
+                                                                    >
+                                                                        Cached Response
+                                                                    </Badge>
+                                                                ) : (
+                                                                    <Badge 
+                                                                        color="success"
+                                                                        appearance="tint"
+                                                                        size="small"
+                                                                        className="status-badge"
+                                                                    >
+                                                                        AI Response
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
                                                         )}
                                                     </div>
                                                 </div>

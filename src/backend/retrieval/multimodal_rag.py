@@ -1,12 +1,18 @@
+import asyncio
 import json
 import logging
+import uuid
 from os import path
 from aiohttp import web
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.agent import KnowledgeAgentRetrievalClient
 from azure.storage.blob import ContainerClient
 from openai import AsyncAzureOpenAI
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
+from dataclasses import asdict
+
+if TYPE_CHECKING:
+    from handlers.feedback_handler import FeedbackHandler
 from retrieval.grounding_retriever import GroundingRetriever
 from retrieval.knowledge_agent import KnowledgeAgentGrounding
 from utils.helpers import get_blob_as_base64
@@ -32,6 +38,7 @@ class MultimodalRag(RagBase):
         openai_client: AsyncAzureOpenAI,
         chatcompletions_model_name: str,
         container_client: ContainerClient,
+        feedback_handler: Optional['FeedbackHandler'] = None,
     ):
         super().__init__(
             openai_client,
@@ -41,6 +48,7 @@ class MultimodalRag(RagBase):
         self.blob_service_client = container_client._get_blob_service_client()
         self.knowledge_agent = knowledge_agent
         self.search_grounding = search_grounding
+        self.feedback_handler = feedback_handler
         # Log auth_mode if available on provided clients
         try:
             auth_mode = getattr(knowledge_agent, 'auth_mode', None) or getattr(search_grounding, 'auth_mode', None)
@@ -55,6 +63,7 @@ class MultimodalRag(RagBase):
         user_message: str,
         chat_thread: list,
         search_config: SearchConfig,
+        request: web.Request = None,
     ):
         """Processes a chat request through the RAG pipeline."""
         await self._send_processing_step_message(
@@ -83,6 +92,127 @@ class MultimodalRag(RagBase):
         grounding_results = None
         grounding_retriever = None
         messages = None
+        
+        # Cache checking step - check for similar questions first
+        cached_response = None
+        if self.feedback_handler and search_config.get("use_cache", True):
+            try:
+                await self._send_processing_step_message(
+                    request_id,
+                    response,
+                    ProcessingStep(
+                        title="Checking cache for similar questions",
+                        type="info",
+                        description="Searching for previously answered similar questions",
+                        content={"user_message": user_message[:100] + "..." if len(user_message) > 100 else user_message}
+                    ),
+                )
+                
+                cached_response = await self.feedback_handler.check_cache_for_similar_question(
+                    question=user_message,
+                    request=request,
+                    similarity_threshold=search_config.get("cache_similarity_threshold", 0.85),  # High threshold for quality
+                    max_results=search_config.get("cache_max_results", 5)
+                )
+                
+                if cached_response:
+                    logger.info("Cache hit - returning cached response", extra={
+                        "request_id": request_id,
+                        "cached_question": cached_response.question[:100] + "...",
+                        "cache_timestamp": cached_response.timestamp
+                    })
+                    
+                    await self._send_processing_step_message(
+                        request_id,
+                        response,
+                        ProcessingStep(
+                            title="✅ Cache hit - Similar question found",
+                            type="info",
+                            description=f"Found similar question from {cached_response.timestamp}",
+                            content={
+                                "cached_question": cached_response.question,
+                                "similarity_used": "High similarity match found in reviewed responses",
+                                "cache_source": "feedback_cache",
+                                "original_timestamp": cached_response.timestamp
+                            }
+                        ),
+                    )
+                    
+                    # Return the cached response with cache indicator
+                    msg_id = str(uuid.uuid4())
+                    
+
+                    
+                    # Send cached response as single message (escape any problematic characters)
+                    content_to_send = cached_response.response_text or ""
+                    logger.info(f"Sending cached response, length: {len(content_to_send)}")
+                    
+                    # Clean the content to avoid JSON issues
+                    clean_content = content_to_send.replace('\r\n', '\n').replace('\r', '\n')
+                    
+                    await self._send_answer_message(
+                        request_id, response, msg_id, clean_content
+                    )
+                    
+                    # Send cached citations
+                    await self._send_citation_message(
+                        request_id,
+                        response,
+                        msg_id,
+                        [asdict(citation) for citation in cached_response.text_citations],
+                        [asdict(citation) for citation in cached_response.image_citations],
+                    )
+                    
+                    await self._send_processing_step_message(
+                        request_id,
+                        response,
+                        ProcessingStep(
+                            title="🎯 Response served from cache",
+                            type="info",
+                            description="Response retrieved from high-quality cached answers",
+                            content={
+                                "cache_indicator": True,
+                                "performance": "Instant response - no search or LLM processing needed",
+                                "quality": "Previously reviewed and approved response"
+                            }
+                        ),
+                    )
+                    
+                    # Small delay to ensure frontend processes the answer before ending
+                    await asyncio.sleep(0.1)
+                    
+                    return  # Exit early with cached response
+                else:
+                    await self._send_processing_step_message(
+                        request_id,
+                        response,
+                        ProcessingStep(
+                            title="Cache miss - No similar questions found",
+                            type="info", 
+                            description="Proceeding with full search and LLM processing",
+                            content={
+                                "cache_checked": True,
+                                "similarity_threshold": search_config.get("cache_similarity_threshold", 0.85),
+                                "next_step": "Full RAG pipeline processing"
+                            }
+                        ),
+                    )
+                    
+            except Exception as cache_error:
+                logger.error("Cache check failed, proceeding with normal flow", extra={
+                    "request_id": request_id,
+                    "error": str(cache_error)
+                }, exc_info=True)
+                await self._send_processing_step_message(
+                    request_id,
+                    response,
+                    ProcessingStep(
+                        title="Cache check failed - Proceeding with normal processing",
+                        type="info",
+                        description="Cache unavailable, using full search pipeline",
+                        content={"cache_error": str(cache_error)}
+                    ),
+                )
         
         try:
             await self._send_processing_step_message(

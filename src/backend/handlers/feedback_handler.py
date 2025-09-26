@@ -18,7 +18,7 @@ from azure.search.documents.indexes.models import (
     SimpleField, SearchableField, ComplexField, AzureOpenAIVectorizer,
     AzureOpenAIVectorizerParameters
 )
-from azure.search.documents.models import IndexAction
+from azure.search.documents.models import IndexAction, VectorizedQuery
 from azure.core.exceptions import AzureError, ResourceNotFoundError
 from openai import AsyncAzureOpenAI
 
@@ -783,6 +783,152 @@ class FeedbackHandler:
                 "message": "Failed to update feedback entry",
                 "operation_id": operation_id
             }, status=500)
+
+    async def check_cache_for_similar_question(
+        self, 
+        question: str, 
+        request: web.Request = None,
+        similarity_threshold: float = 0.85,
+        max_results: int = 5
+    ) -> Optional[FeedbackEntry]:
+        """
+        Check if we have a similar question in the cache using vector similarity search.
+        
+        Args:
+            question: The user's question to search for
+            similarity_threshold: Minimum similarity score (0.0 to 1.0)
+            max_results: Maximum number of results to check
+            
+        Returns:
+            FeedbackEntry if a similar question is found, None otherwise
+        """
+        operation_id = f"cache_check_{int(time.time())}"
+        
+        try:
+            logger.info("=== STARTING CACHE CHECK ===", extra={
+                "operation_id": operation_id,
+                "question": question[:200] + "..." if len(question) > 200 else question,
+                "question_length": len(question),
+                "similarity_threshold": similarity_threshold
+            })
+            
+            # First, embed the user's question
+            embedding_response = await self.openai_client.embeddings.create(
+                input=question,
+                model=self.embedding_deployment
+            )
+            question_vector = embedding_response.data[0].embedding
+            
+            logger.info("Generated question embedding", extra={
+                "operation_id": operation_id,
+                "embedding_dimension": len(question_vector)
+            })
+            
+            # Ensure cache index exists
+            await self.initialize_feedback_index()
+            
+            # Get search client using the existing method
+            search_client = self._get_search_client(request)
+            
+            # Perform vector similarity search on cached questions
+            # Only search through positive feedback (thumbs_up) that has been reviewed
+            logger.info("Starting cache vector search", extra={
+                "operation_id": operation_id,
+                "vector_dimension": len(question_vector),
+                "max_results": max_results
+            })
+            
+            search_results = await search_client.search(
+                search_text="*",
+                #filter="feedback_type eq 'thumbs_up' and is_reviewed eq true",
+                vector_queries=[VectorizedQuery(
+                    vector=question_vector,
+                    k_nearest_neighbors=max_results,
+                    fields="question_vector"
+                )],
+                select=["id", "request_id", "session_id", "timestamp", "feedback_type", 
+                       "question", "response_text", "text_citations", 
+                       "image_citations", "processing_steps", "search_config", "admin_notes", 
+                       "is_reviewed", "last_modified", "modified_by", "text_citations_count", 
+                       "image_citations_count", "user_agent", "ip_address"],
+                top=max_results
+            )
+            
+            logger.info("Cache search query executed", extra={
+                "operation_id": operation_id
+            })
+            
+            # Check similarity scores and return the best match above threshold
+            best_match = None
+            best_score = 0.0  # Start with 0.0, only update if above threshold
+            
+            results_count = 0
+            logger.info("=== STARTING RESULT PROCESSING ===")
+            async for result in search_results:
+                results_count += 1
+                
+                # Get the similarity score from the search result
+                score = result.get('@search.score', 0.0)
+                
+                # Log detailed result info
+                question_text = result.get("question", "N/A") if hasattr(result, 'get') else getattr(result, "question", "N/A")
+                timestamp_text = result.get("timestamp", "N/A") if hasattr(result, 'get') else getattr(result, "timestamp", "N/A")
+                
+                logger.info("=== CACHE RESULT ANALYSIS ===", extra={
+                    "operation_id": operation_id,
+                    "result_number": results_count,
+                    "cached_question": question_text[:100] + "..." if len(str(question_text)) > 100 else str(question_text),
+                    "similarity_score": score,
+                    "threshold": similarity_threshold,
+                    "timestamp": timestamp_text,
+                    "score_above_threshold": score >= similarity_threshold,
+                    "result_type": type(result).__name__
+                })
+                
+                if score >= similarity_threshold and score > best_score:
+                    best_match = result
+                    best_score = score
+                    logger.info(f"NEW BEST MATCH: score={score}, threshold={similarity_threshold}")
+                elif score >= similarity_threshold:
+                    logger.info(f"ABOVE THRESHOLD but not better than current best: {score} vs {best_score}")
+                else:
+                    logger.info(f"BELOW THRESHOLD: {score} < {similarity_threshold}")
+            
+            logger.info("=== CACHE SEARCH COMPLETED ===", extra={
+                "operation_id": operation_id,
+                "total_results_found": results_count,
+                "best_score_achieved": best_score,
+                "similarity_threshold": similarity_threshold,
+                "cache_hit": best_match is not None,
+                "search_successful": results_count > 0
+            })
+            
+            if best_match:
+                logger.info("Cache hit - similar question found", extra={
+                    "operation_id": operation_id,
+                    "similarity_score": best_score,
+                    "cached_question": best_match["question"][:100] + "...",
+                    "cache_timestamp": best_match["timestamp"]
+                })
+                
+                # Convert search result back to FeedbackEntry
+                cached_entry = FeedbackEntry.from_search_document(best_match)
+                return cached_entry
+            else:
+                logger.info("Cache miss - no similar question found", extra={
+                    "operation_id": operation_id,
+                    "results_checked": max_results,
+                    "similarity_threshold": similarity_threshold
+                })
+                return None
+                
+        except Exception as e:
+            logger.error("Failed to check cache for similar question", extra={
+                "operation_id": operation_id,
+                "error": str(e)
+            }, exc_info=True)
+            # Don't fail the entire request if cache check fails
+            return None
     
     def attach_to_app(self, app: web.Application) -> None:
         """Attach feedback routes to the application."""

@@ -192,13 +192,21 @@ class ProductionApp:
                 client_max_size=self.config.server.max_request_size
             )
 
-            # Initialize multimodal RAG
+            # Initialize feedback handler
+            feedback_handler = FeedbackHandler(
+                search_index_client=index_client,
+                openai_client=openai_client,
+                embedding_deployment=self.config.azure_openai.embedding_deployment
+            )
+
+            # Initialize multimodal RAG with feedback handler for caching
             mmrag = MultimodalRag(
                 knowledge_agent,
                 search_grounding,
                 openai_client,
                 self.config.azure_openai.deployment,
                 artifacts_container_client,
+                feedback_handler,  # Pass feedback handler for cache checking
             )
             mmrag.attach_to_app(app, "/chat")
 
@@ -207,13 +215,6 @@ class ProductionApp:
                 blob_service_client, samples_container_client, artifacts_container_client
             )
             admin_handler = AdminHandler()
-            
-            # Initialize feedback handler
-            feedback_handler = FeedbackHandler(
-                search_index_client=index_client,
-                openai_client=openai_client,
-                embedding_deployment=self.config.azure_openai.embedding_deployment
-            )
 
             # Add routes
             await self._setup_routes(app, index_client, citation_files_handler, admin_handler, search_client, feedback_handler)

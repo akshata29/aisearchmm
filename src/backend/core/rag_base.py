@@ -78,7 +78,7 @@ class RagBase(ABC):
         
         try:
             await self._process_request(
-                request_id, response, search_text, chat_thread, search_config
+                request_id, response, search_text, chat_thread, search_config, request
             )
         except Exception as e:
             logger.error(f"Error processing request: {str(e)}")
@@ -114,6 +114,7 @@ class RagBase(ABC):
         search_text: str,
         chat_thread: list,
         search_config: SearchConfig,
+        request: web.Request = None,
     ):
         pass
 
@@ -405,15 +406,18 @@ class RagBase(ABC):
 
     async def _send_message(self, response, event, data):
         try:
+            json_data = json.dumps(data)
+            if event == "answer":
+                logger.error(f"SENDING ANSWER EVENT: event={event}, data_length={len(json_data)}, data_preview={json_data[:200]}...")
             await response.write(
-                f"event:{event}\ndata: {json.dumps(data)}\n\n".encode("utf-8")
+                f"event:{event}\ndata: {json_data}\n\n".encode("utf-8")
             )
         except ConnectionResetError:
             # TODO: Something is wrong here, the messages attempted and failed here is not what the UI sees, thats another set of stream...
             # logger.warning("Connection reset by client.")
             pass
         except Exception as e:
-            logger.error(f"Error sending message: {e}")
+            logger.error(f"Error sending message: {e}", exc_info=True)
 
     async def _send_end(self, response):
         await self._send_message(response, MessageType.END.value, {})
