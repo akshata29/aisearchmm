@@ -118,7 +118,6 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                                 )
                             )
                         ],
-                        # Note: max_output_size removed as it's not a valid parameter
                     )
                 )
             )
@@ -313,7 +312,9 @@ class KnowledgeAgentGrounding(GroundingRetriever):
                     
                     # Create the agent and retry
                     try:
-                        await self._create_retrieval_agent_async(
+                        # Reset flag to force recreation
+                        self._agent_created = False
+                        await self._ensure_retrieval_agent(
                             self.agent_name,
                             self.azure_openai_endpoint,
                             self.azure_openai_searchagent_deployment,

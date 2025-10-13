@@ -1,0 +1,55 @@
+{
+  "name": "teams-rag-app",
+  "version": "1.0.0",
+  "description": "Microsoft Teams AI bot, message extension, and personal tab for multimodal RAG backend integration.",
+  "private": true,
+  "scripts": {
+    "clean": "rimraf dist .turbo cache .parcel-cache",
+    "build": "tsc -p tsconfig.json",
+    "dev": "cross-env NODE_ENV=development tsx watch src/index.ts",
+    "dev:devtools": "cross-env NODE_ENV=development tsx watch src/index.ts --devtools",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "start": "node dist/index.js",
+    "package": "tsx scripts/package.ts"
+  },
+  "dependencies": {
+    "@microsoft/teams-js": "^2.21.0",
+    "@microsoft/teams.ai": "^2.0.1",
+    "@microsoft/teams.api": "^2.0.1",
+    "@microsoft/teams.apps": "^2.0.1",
+    "@microsoft/teams.common": "^2.0.1",
+    "@microsoft/teams.dev": "^2.0.1",
+    "adaptivecards": "^3.0.0",
+    "adaptivecards-templating": "^2.3.1",
+    "adm-zip": "^0.5.12",
+    "axios": "^1.7.7",
+    "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
+    "dotenv": "^16.4.5",
+    "eventsource-parser": "^1.1.0",
+    "express": "^4.19.2",
+    "pino": "^9.3.2",
+    "pino-pretty": "^11.2.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.9",
+    "@typescript-eslint/eslint-plugin": "^7.16.1",
+    "@typescript-eslint/parser": "^7.16.1",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-prettier": "^5.2.1",
+    "prettier": "^3.3.3",
+    "rimraf": "^5.0.7",
+    "tsx": "^4.17.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18.20"
+  }
+}

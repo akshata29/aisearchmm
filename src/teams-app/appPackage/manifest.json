@@ -1,0 +1,105 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "00000000-0000-0000-0000-000000000000",
+  "packageName": "com.contoso.teamsrag",
+  "developer": {
+    "name": "Contoso AI",
+    "websiteUrl": "https://contoso.com",
+    "privacyUrl": "https://contoso.com/privacy",
+    "termsOfUseUrl": "https://contoso.com/terms"
+  },
+  "name": {
+    "short": "RAG Assistant",
+    "full": "Multimodal RAG Assistant"
+  },
+  "description": {
+    "short": "Bot, message extension, and tab for your multimodal RAG backend.",
+    "full": "Connect Microsoft Teams to your multimodal RAG backend with an @microsoft/teams-ai v2 bot, action & search message extensions, and a personal tab."
+  },
+  "accentColor": "#5B5FC7",
+  "icons": {
+    "outline": "icons/outline.png",
+    "color": "icons/color.png"
+  },
+  "bots": [
+    {
+  "botId": "00000000-0000-0000-0000-000000000000",
+      "scopes": ["personal", "team", "groupchat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["personal", "team", "groupchat"],
+          "commands": [
+            {
+              "title": "/help",
+              "description": "Show bot capabilities"
+            },
+            {
+              "title": "/reset",
+              "description": "Reset conversation history"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "composeExtensions": [
+    {
+  "botId": "00000000-0000-0000-0000-000000000000",
+      "commands": [
+        {
+          "id": "askRag",
+          "type": "action",
+          "title": "Ask RAG",
+          "description": "Open a task module to ask the RAG assistant",
+          "context": ["compose"],
+          "fetchTask": true
+        },
+        {
+          "id": "searchRag",
+          "type": "query",
+          "title": "Search RAG",
+          "description": "Search the RAG knowledge base",
+          "parameters": [
+            {
+              "name": "query",
+              "title": "Query",
+              "description": "Enter your search terms"
+            }
+          ]
+        }
+      ],
+      "messageHandlers": [
+        {
+          "type": "link",
+          "value": {
+            "domains": ["your-app.azurewebsites.net", "localhost:5173"]
+          }
+        }
+      ]
+    }
+  ],
+  "staticTabs": [
+    {
+      "entityId": "ragTab",
+      "name": "RAG Assistant",
+      "contentUrl": "https://localhost:5173",
+      "websiteUrl": "https://localhost:5173",
+      "scopes": ["personal"]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": [
+    "your-app.azurewebsites.net",
+    "localhost:5173",
+    "localhost",
+    "teams.microsoft.com"
+  ],
+  "webApplicationInfo": {
+  "id": "11111111-1111-1111-1111-111111111111",
+  "resource": "api://11111111-1111-1111-1111-111111111111"
+  }
+}

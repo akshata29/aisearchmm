@@ -1,0 +1,50 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "RAG answer",
+      "weight": "Bolder",
+      "size": "Medium"
+    },
+    {
+      "type": "TextBlock",
+      "id": "answerText",
+      "text": "",
+      "wrap": true
+    },
+    {
+      "type": "ActionSet",
+      "id": "sourceToggle",
+      "actions": [
+        {
+          "type": "Action.ToggleVisibility",
+          "title": "Sources",
+          "targetElements": ["sourcesContainer"]
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "id": "sourcesContainer",
+      "isVisible": false,
+      "items": []
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.OpenUrl",
+      "title": "Open in Tab",
+      "id": "openInTab",
+  "url": "https://contoso.com"
+    },
+    {
+      "type": "Action.OpenUrl",
+      "title": "Copy",
+      "id": "copyLink",
+  "url": "https://contoso.com"
+    }
+  ]
+}
