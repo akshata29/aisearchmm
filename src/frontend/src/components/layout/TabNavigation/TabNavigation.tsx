@@ -22,7 +22,6 @@ export const TabNavigation = ({ selectedTab, onTabSelect, isAdmin }: TabNavigati
         <div className="tab-navigation">
             <TabList selectedValue={selectedTab} onTabSelect={handleTabSelect}>
                 <Tab value="chat">Chat</Tab>
-                <Tab value="teams">Teams Integration</Tab>
                 {isAdmin && <Tab value="upload">Upload Documents</Tab>}
                 {isAdmin && <Tab value="feedback">Feedback</Tab>}
                 {isAdmin && <Tab value="admin">Admin</Tab>}

@@ -1,5 +1,8 @@
 import { App } from '@microsoft/teams.apps';
 import { DevtoolsPlugin } from '@microsoft/teams.dev';
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import { appConfig } from './common/config/env';
 import { childLogger } from './common/logger';
 import { ConversationStore } from './bot/state/conversationStore';
@@ -44,9 +47,136 @@ function createQuestionActions(questions: string[], maxQuestions = 6) {
     return {
       type: 'Action.Submit',
       title: shortTitles[index] || `Question ${index + 1}`,
+      text: question,
+      displayText: question,
       data: { query: question }
     };
   });
+}
+
+function buildTabDeepLink(query: string, baseUrl: string, appId?: string) {
+  const trimmed = query.trim();
+  const url = new URL(baseUrl);
+  url.searchParams.set('q', trimmed);
+
+  if (!appId) {
+    return url.toString();
+  }
+
+  const label = encodeURIComponent('RAG Assistant');
+  const webUrl = encodeURIComponent(url.toString());
+  const contextPayload = {
+    subEntityId: trimmed.slice(0, 64) || 'default',
+    q: trimmed
+  };
+  const context = encodeURIComponent(JSON.stringify(contextPayload));
+
+  return `https://teams.microsoft.com/l/entity/${appId}/ragTab?label=${label}&webUrl=${webUrl}&context=${context}`;
+}
+
+let tabServerStarted = false;
+
+async function maybeStartTabStaticHost() {
+  if (tabServerStarted) {
+    return;
+  }
+
+  if (!appConfig.tabBaseUrl) {
+    return;
+  }
+
+  if (process.env['NODE_ENV'] === 'development') {
+    return;
+  }
+
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(appConfig.tabBaseUrl);
+  } catch (error) {
+    log.warn({ error }, 'TAB_BASE_URL is not a valid URL; skipping static host');
+    return;
+  }
+
+  const isLocalHost = ['localhost', '127.0.0.1'].includes(targetUrl.hostname.toLowerCase());
+  if (!isLocalHost) {
+    return;
+  }
+
+  const outputDir = path.resolve(__dirname, '../tab');
+  if (!fs.existsSync(outputDir)) {
+    log.warn({ outputDir }, 'Tab static assets directory not found; run "npm run tab:build" to generate it');
+    return;
+  }
+
+  const staticApp = express();
+  staticApp.use(express.static(outputDir));
+  staticApp.get('*', (_req, res) => {
+    res.sendFile(path.join(outputDir, 'index.html'));
+  });
+
+  const port = Number.parseInt(targetUrl.port || '5300', 10);
+  await new Promise<void>((resolve) => {
+    const server = staticApp.listen(port, () => {
+      tabServerStarted = true;
+      log.info({ port }, 'Local static host for Teams tab running');
+      resolve();
+    });
+
+    server.on('error', (error) => {
+      log.warn({ port, error }, 'Failed to start local static host for Teams tab');
+      resolve();
+    });
+  });
+}
+
+async function echoUserQuery(client: any, query: string) {
+  const from = client.activity.from;
+  if (!from?.id) {
+    return;
+  }
+
+  const channelData = client.activity.channelData ?? {};
+
+  await client.send({
+    type: 'message',
+    text: query,
+    channelData: {
+      ...channelData,
+      onBehalfOf: [
+        {
+          itemId: 0,
+          displayName: from.name ?? 'You',
+          mri: from.id,
+          mentionType: 'person'
+        }
+      ]
+    }
+  });
+}
+
+function getAdaptiveCardQuery(activity: any): string | undefined {
+  // Action.Submit payloads show up in different shapes depending on channel/tooling
+  const value = activity?.value;
+  const possiblePayloads = [
+    value?.action?.data,
+    value?.submittedData,
+    value?.data,
+    value
+  ];
+
+  for (const payload of possiblePayloads) {
+    if (payload && typeof payload === 'object' && 'query' in payload) {
+      const queryValue = (payload as Record<string, unknown>)['query'];
+      if (typeof queryValue === 'string') {
+        const trimmed = queryValue.trim();
+        if (trimmed.length > 0) {
+          return trimmed;
+        }
+      }
+    }
+  }
+
+  return undefined;
 }
 
 // Process RAG query
@@ -128,18 +258,22 @@ async function main() {
   });
 
   const store = new ConversationStore(10);
+
+  await maybeStartTabStaticHost();
   const tabDeepLink = appConfig.tabBaseUrl
-    ? (query: string) => `${appConfig.tabBaseUrl}?q=${encodeURIComponent(query)}`
+    ? (query: string) => buildTabDeepLink(query, appConfig.tabBaseUrl!, appConfig.teamsAppId)
     : undefined;
 
   // Handle card actions (button clicks)
   app.on('invoke', async (client) => {
     if (client.activity.name === 'adaptiveCard/action') {
-      const data = client.activity.value?.action?.data;
-      if (data?.['query']) {
-        // Treat card action as a message
+      const query = getAdaptiveCardQuery(client.activity);
+      if (query) {
+        await echoUserQuery(client, query);
         const conversationId = client.activity.conversation?.id ?? 'default';
-        await processQuery(client, data['query'], conversationId, store, tabDeepLink, log);
+        await processQuery(client, query, conversationId, store, tabDeepLink, log);
+      } else {
+        log.warn({ activity: client.activity }, 'Adaptive card submit received without query payload');
       }
     }
   });
@@ -164,7 +298,7 @@ async function main() {
         }
       ],
       actions: [
-        ...createQuestionActions(SAMPLE_QUESTIONS, 4),
+        ...createQuestionActions(SAMPLE_QUESTIONS, 10),
         {
           type: 'Action.Submit',
           title: '❓ See all questions (/help)',
@@ -184,17 +318,19 @@ async function main() {
 
   // Handle messages
   app.on('message', async (client) => {
+    const submittedQuery = getAdaptiveCardQuery(client.activity);
     const text = client.activity.text?.trim();
-    if (!text) return;
+    const effectiveQuery = (submittedQuery ?? text)?.trim();
+    const normalizedQuery = effectiveQuery?.toLowerCase();
+
+    if (!effectiveQuery) {
+      return;
+    }
 
     const conversationId = client.activity.conversation?.id ?? 'default';
-    
-    // Check if this is the first interaction (no conversation history)
-    const conversationHistory = store.getHistory(conversationId);
-    const isFirstInteraction = !conversationHistory || conversationHistory.length === 0;
 
     // Handle commands
-    if (text.toLowerCase() === '/help' || text.toLowerCase() === '/home') {
+    if (normalizedQuery === '/help' || normalizedQuery === '/home') {
       const helpCard = {
         type: 'AdaptiveCard',
         version: '1.4',
@@ -236,7 +372,7 @@ async function main() {
       return;
     }
 
-    if (text.toLowerCase() === '/popular') {
+    if (normalizedQuery === '/popular') {
       // Create text list of questions for DevTools compatibility
       const questionsList = SAMPLE_QUESTIONS.map((q, i) => `**${i + 1}.** ${q}`).join('\n\n');
       
@@ -276,14 +412,14 @@ async function main() {
       return;
     }
 
-    if (text.toLowerCase() === '/reset') {
+    if (normalizedQuery === '/reset') {
       store.clear(conversationId);
       await client.send('✅ Conversation history cleared!');
       return;
     }
 
     // Show welcome card only for specific trigger words
-    if (text.toLowerCase() === 'start' || text.toLowerCase() === 'hello' || text.toLowerCase() === 'welcome') {
+    if (normalizedQuery === 'start' || normalizedQuery === 'hello' || normalizedQuery === 'welcome') {
       const welcomeCard = {
         type: 'AdaptiveCard',
         version: '1.4',
@@ -321,8 +457,12 @@ async function main() {
       return; // Don't process as a regular question
     }
 
+    if (submittedQuery && !text) {
+      await echoUserQuery(client, submittedQuery);
+    }
+
     // Process the query using shared function
-    await processQuery(client, text, conversationId, store, tabDeepLink);
+    await processQuery(client, effectiveQuery, conversationId, store, tabDeepLink);
   });
 
   // Handle errors

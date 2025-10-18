@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://aka.ms/teams-toolkit/1.0.0/yaml.schema.json
+# Workspace-level local debug automation for Microsoft 365 Agents Toolkit.
+version: 1.0.0
+
+environmentFolderPath: ./src/teams-app/env
+
+provision:
+  - uses: teamsApp/create
+    with:
+      name: TeamsApp${{APP_NAME_SUFFIX}}
+    writeToEnvironmentFile:
+      teamsAppId: TEAMS_APP_ID
+
+  - uses: botAadApp/create
+    with:
+      name: TeamsApp${{APP_NAME_SUFFIX}}
+    writeToEnvironmentFile:
+      botId: BOT_ID
+      botPassword: SECRET_BOT_PASSWORD
+
+  - uses: botFramework/create
+    with:
+      botId: ${{BOT_ID}}
+      name: TeamsApp
+      messagingEndpoint: ${{BOT_ENDPOINT}}/api/messages
+      description: ''
+      channels:
+        - name: msteams
+
+  - uses: teamsApp/validateManifest
+    with:
+      manifestPath: ./src/teams-app/appPackage/manifest.json
+
+  - uses: teamsApp/zipAppPackage
+    with:
+      manifestPath: ./src/teams-app/appPackage/manifest.json
+      outputZipPath: ./src/teams-app/appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+      outputJsonPath: ./src/teams-app/appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+
+  - uses: teamsApp/update
+    with:
+      appPackagePath: ./src/teams-app/appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+
+deploy:
+  - uses: cli/runNpmCommand
+    name: install dependencies
+    with:
+      workingDirectory: ./src/teams-app
+      args: install --no-audit --workspaces=false
+
+  - uses: file/createOrUpdateEnvironmentFile
+    with:
+      target: ./src/teams-app/.env
+      envs:
+        PORT: 3978
+        BOT_ID: ${{BOT_ID}}
+        BOT_PASSWORD: ${{SECRET_BOT_PASSWORD}}
+        SECRET_BOT_PASSWORD: ${{SECRET_BOT_PASSWORD}}

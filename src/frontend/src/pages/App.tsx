@@ -3,7 +3,6 @@ import { Title1 } from "@fluentui/react-components";
 import { useEffect, useState } from "react";
 
 import "./App.css";
-import { useTeamsContext } from "../hooks/useTeamsContext";
 import { Header } from "../components/layout/Header/Header";
 import { NavBar } from "../components/layout/NavBar/NavBar";
 import Samples from "../components/search/Samples/Samples";
@@ -13,7 +12,6 @@ import ProfessionalDocumentUpload from "../components/upload/DocumentUpload/Docu
 import Admin from "../components/admin/Admin";
 import FeedbackAdmin from "../components/FeedbackAdmin";
 import ProfessionalChatContent from "../components/chat/ChatContent/ChatContent";
-import { TeamsIntegrationTest } from "../components/TeamsIntegrationTest";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { ThemeProvider, useTheme } from "../contexts";
 import useChat from "../hooks/useChat";
@@ -24,7 +22,6 @@ function AppContent() {
     const { config, setConfig } = useConfig();
     const { thread, processingStepsMessage, chats, isLoading, handleQuery, onNewChat } = useChat(config);
     const { darkMode, setDarkMode } = useTheme();
-    const teamsContext = useTeamsContext();
     const [newQ, setnewQ] = useState(false);
     const [selectedTab, setSelectedTab] = useState("chat");
     const [isAdmin, setIsAdmin] = useState(false);
@@ -98,12 +95,6 @@ function AppContent() {
                                             <Title1 block align="center">
                                                 {INTRO_TITLE}
                                             </Title1>
-                                            {teamsContext.isInTeams && (
-                                                <Caption1 block align="center" style={{ color: '#5b5fc7', margin: '8px 0' }}>
-                                                    🚀 Running in Microsoft Teams
-                                                    {teamsContext.userPrincipalName && ` • Welcome, ${teamsContext.userPrincipalName.split('@')[0]}!`}
-                                                </Caption1>
-                                            )}
                                             <br />
                                             <Caption1 style={{ fontWeight: "bold" }} block align="center">
                                                 Choose an example to start with...
@@ -126,10 +117,6 @@ function AppContent() {
                                 </div>
                             </div>
                         </>
-                    ) : selectedTab === "teams" ? (
-                        <ErrorBoundary>
-                            <TeamsIntegrationTest />
-                        </ErrorBoundary>
                     ) : selectedTab === "upload" && isAdmin ? (
                         <ErrorBoundary>
                             <ProfessionalDocumentUpload />

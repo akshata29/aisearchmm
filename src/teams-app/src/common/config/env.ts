@@ -9,6 +9,7 @@ const rawEnv = (() => {
     RAG_API_BASE_URL: process.env['RAG_API_BASE_URL'],
     ALLOWED_ORIGINS: process.env['ALLOWED_ORIGINS'],
     TAB_BASE_URL: process.env['TAB_BASE_URL'],
+    TEAMS_APP_ID: process.env['TEAMS_APP_ID'],
     HTTP_PROXY: process.env['HTTP_PROXY'],
     HTTPS_PROXY: process.env['HTTPS_PROXY'],
     REQUEST_TIMEOUT_MS: process.env['REQUEST_TIMEOUT_MS'],
@@ -17,8 +18,16 @@ const rawEnv = (() => {
 })();
 
 const envSchema = z.object({
-  BOT_ID: z.string().uuid('BOT_ID must be a valid GUID').optional(),
-  BOT_PASSWORD: z.string().min(1, 'BOT_PASSWORD is required when BOT_ID is set').optional(),
+  BOT_ID: z
+    .string()
+    .uuid('BOT_ID must be a valid GUID')
+    .optional()
+    .or(z.literal('')),
+  BOT_PASSWORD: z
+    .string()
+    .min(1, 'BOT_PASSWORD is required when BOT_ID is set')
+    .optional()
+    .or(z.literal('')),
   RAG_API_BASE_URL: z
     .string()
     .url('RAG_API_BASE_URL must be a valid URL')
@@ -33,6 +42,7 @@ const envSchema = z.object({
         .filter((origin: string) => origin.length > 0) ?? []
     ),
   TAB_BASE_URL: z.string().url().optional(),
+  TEAMS_APP_ID: z.string().uuid('TEAMS_APP_ID must be a valid GUID').optional().or(z.literal('')),
   HTTP_PROXY: z.string().url().optional(),
   HTTPS_PROXY: z.string().url().optional(),
   REQUEST_TIMEOUT_MS: z
@@ -59,6 +69,7 @@ export interface AppConfig {
   ragApiBaseUrl: string;
   allowedOrigins: string[];
   tabBaseUrl?: string;
+  teamsAppId?: string;
   httpProxy?: string;
   httpsProxy?: string;
   requestTimeoutMs: number;
@@ -71,6 +82,7 @@ export const appConfig: AppConfig = {
   ragApiBaseUrl: parsedEnv.RAG_API_BASE_URL,
   allowedOrigins: parsedEnv.ALLOWED_ORIGINS,
   tabBaseUrl: parsedEnv.TAB_BASE_URL,
+  teamsAppId: parsedEnv.TEAMS_APP_ID,
   httpProxy: parsedEnv.HTTP_PROXY,
   httpsProxy: parsedEnv.HTTPS_PROXY,
   requestTimeoutMs: parsedEnv.REQUEST_TIMEOUT_MS ?? 20000,

@@ -76,7 +76,7 @@
         {
           "type": "link",
           "value": {
-            "domains": ["your-app.azurewebsites.net", "localhost:5173"]
+            "domains": ["your-app.azurewebsites.net", "localhost:5300"]
           }
         }
       ]
@@ -86,15 +86,15 @@
     {
       "entityId": "ragTab",
       "name": "RAG Assistant",
-      "contentUrl": "https://localhost:5173",
-      "websiteUrl": "https://localhost:5173",
+      "contentUrl": "https://localhost:5300",
+      "websiteUrl": "https://localhost:5300",
       "scopes": ["personal"]
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],
   "validDomains": [
     "your-app.azurewebsites.net",
-    "localhost:5173",
+    "localhost:5300",
     "localhost",
     "teams.microsoft.com"
   ],

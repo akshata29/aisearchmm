@@ -1,0 +1,192 @@
+// Auto-generated Teams debug tasks adapted for workspace-level execution.
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Teams App Locally",
+      "dependsOn": [
+        "Validate prerequisites",
+        "Start local tunnel",
+        "Provision",
+        "Deploy",
+        "Start application"
+      ],
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "Validate prerequisites",
+      "type": "teamsfx",
+      "command": "debug-check-prerequisites",
+      "args": {
+        "prerequisites": [
+          "nodejs",
+          "m365Account",
+          "portOccupancy"
+        ],
+        "portOccupancy": [
+          3978,
+          9239
+        ]
+      }
+    },
+    {
+      "label": "Start local tunnel",
+      "type": "teamsfx",
+      "command": "debug-start-local-tunnel",
+      "args": {
+        "type": "dev-tunnel",
+        "ports": [
+          {
+            "portNumber": 3978,
+            "protocol": "http",
+            "access": "public",
+            "writeToEnvironmentFile": {
+              "endpoint": "BOT_ENDPOINT",
+              "domain": "BOT_DOMAIN"
+            }
+          }
+        ],
+        "env": "local"
+      },
+      "isBackground": true,
+      "problemMatcher": "$teamsfx-local-tunnel-watch"
+    },
+    {
+      "label": "Provision",
+      "type": "teamsfx",
+      "command": "provision",
+      "args": {
+        "env": "local"
+      }
+    },
+    {
+      "label": "Deploy",
+      "type": "teamsfx",
+      "command": "deploy",
+      "args": {
+        "env": "local"
+      }
+    },
+    {
+      "label": "Start application",
+      "type": "shell",
+      "command": "npm run dev:teamsfx",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/src/teams-app"
+      },
+      "problemMatcher": {
+        "pattern": [
+          {
+            "regexp": "^.*$",
+            "file": 0,
+            "location": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "[nodemon] starting",
+          "endsPattern": "listening|[nodemon] app crashed"
+        }
+      }
+    },
+    {
+      "label": "Start Teams App (Test Tool)",
+      "dependsOn": [
+        "Validate prerequisites (Test Tool)",
+        "Deploy (Test Tool)",
+        "Start application (Test Tool)",
+        "Start Test Tool"
+      ],
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "Validate prerequisites (Test Tool)",
+      "type": "teamsfx",
+      "command": "debug-check-prerequisites",
+      "args": {
+        "prerequisites": [
+          "nodejs",
+          "portOccupancy"
+        ],
+        "portOccupancy": [
+          3978,
+          9239,
+          56150
+        ]
+      }
+    },
+    {
+      "label": "Deploy (Test Tool)",
+      "type": "teamsfx",
+      "command": "deploy",
+      "args": {
+        "env": "testtool"
+      }
+    },
+    {
+      "label": "Start application (Test Tool)",
+      "type": "shell",
+      "command": "npm run dev:teamsfx:testtool",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/src/teams-app"
+      },
+      "problemMatcher": {
+        "pattern": [
+          {
+            "regexp": "^.*$",
+            "file": 0,
+            "location": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "[nodemon] starting",
+          "endsPattern": "listening|[nodemon] app crashed"
+        }
+      }
+    },
+    {
+      "label": "Start Test Tool",
+      "type": "shell",
+      "command": "npm run dev:teamsfx:launch-testtool",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/src/teams-app",
+        "env": {
+          "PATH": "${workspaceFolder}/src/teams-app/devTools/teamsapptester/node_modules/.bin:${env:PATH}"
+        }
+      },
+      "windows": {
+        "options": {
+          "cwd": "${workspaceFolder}/src/teams-app",
+          "env": {
+            "PATH": "${workspaceFolder}/src/teams-app/devTools/teamsapptester/node_modules/.bin;${env:PATH}"
+          }
+        }
+      },
+      "problemMatcher": {
+        "pattern": [
+          {
+            "regexp": "^.*$",
+            "file": 0,
+            "location": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "listening on"
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "silent"
+      }
+    }
+  ]
+}

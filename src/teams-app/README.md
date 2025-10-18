@@ -7,7 +7,7 @@ This project adds a Microsoft Teams app that connects your existing multimodal R
 - **Conversational bot**: Streams grounded answers from the Python RAG service, returning Adaptive Cards with citations.
 - **Slash commands**: `/help` shows capabilities; `/reset` clears per-conversation memory.
 - **Message extension**: Action command *Ask RAG* opens a task module form, and search command *Search RAG* provides live suggestions from the RAG service.
-- **Personal tab**: React + Vite app using `@microsoft/teams-js` v2; embeds the existing UI via iframe or renders a lightweight search surface that deep links to the bot.
+- **Personal tab**: React + Vite experience hosted inside this project, built with Fluent UI and deep linking back to the bot.
 - **Production essentials**: Strict TypeScript, ESLint/Prettier, structured logging, retry/timeout protection, deployment-ready Azure Bicep, and app packaging scripts.
 
 ## Prerequisites
@@ -30,7 +30,7 @@ teams-app/
   src/
     bot/                # Express entry point, Teams AI bot, commands
     me/                 # Message extension handlers
-    tab/web/            # Vite + React tab implementation
+  tab/                # Vite + React tab implementation
     common/             # Shared configuration, models, helpers
   appPackage/           # Teams manifest, icons, packaging artifacts
   scripts/
@@ -43,7 +43,8 @@ teams-app/
    - `BOT_ID` / `BOT_PASSWORD`: From your Azure Bot registration
    - `RAG_API_BASE_URL`: Base URL of the Python backend (e.g. `https://your-api.azurewebsites.net` or `http://localhost:5000`)
    - `ALLOWED_ORIGINS`: Origins allowed for CORS (include tab origin and dev URLs)
-   - `TAB_BASE_URL`: Base URL serving the React tab (typically `http://localhost:5300` in dev)
+  - `TAB_BASE_URL`: Base URL serving the React tab (typically `https://localhost:5300` in dev)
+  - `TEAMS_APP_ID`: (Optional) Used to generate Teams deep links for the tab action button
 2. Ensure the backend is reachable from the bot (configure firewall or tunnels as required).
 
 ## Local development
@@ -51,12 +52,12 @@ teams-app/
 ```bash
 cd teams-app
 npm install
-npm run dev
+npm run dev:all
 ```
 
-- `npm run dev:bot` starts the Express bot with live reload via `tsx`
-- `npm run dev:tab` launches the Vite dev server for the personal tab
-- `npm run dev` runs both concurrently
+- `npm run dev` starts the bot only with live reload via `tsx`
+- `npm run tab:dev` launches the HTTPS Vite dev server for the personal tab on port 5300
+- `npm run dev:all` runs both bot and tab concurrently for an end-to-end experience
 
 Use the Bot Framework Emulator or Teams Developer Portal to chat locally. Ensure the messaging endpoint is `https://<public-ngrok-domain>/api/messages` when tunnelling.
 
@@ -68,7 +69,8 @@ Launch configs live in `.vscode/launch.json`. Set breakpoints in `src/bot/**/*.t
 
 - `npm run lint` – static analysis (ESLint + Prettier)
 - `npm run format` – format all files
-- `npm run build` – type-check and produce production bundles (bot in `dist/`, tab in `src/tab/web/dist/`)
+- `npm run build` – type-check and produce production bot bundle in `dist/`
+- `npm run tab:build` – produce static tab assets in `dist/tab`
 
 ## Packaging the Teams app
 

@@ -254,6 +254,7 @@ The app includes:
 - **Bot capabilities** with commands (`/help`, `/popular`, `/reset`)
 - **Message extensions** (`askRag`, `searchRag`)
 - **Personal tab** pointing to your frontend
+ - **Personal tab** serving the embedded Teams experience
 - **Proper icons** (192x192 color, 32x32 transparent outline)
 
 Key manifest configuration:
@@ -263,8 +264,8 @@ Key manifest configuration:
     {
       "entityId": "ragTab",
       "name": "RAG Assistant", 
-      "contentUrl": "https://localhost:5173",
-      "websiteUrl": "https://localhost:5173",
+   "contentUrl": "https://localhost:5300",
+   "websiteUrl": "https://localhost:5300",
       "scopes": ["personal"]
     }
   ]
@@ -314,10 +315,9 @@ Once uploaded successfully:
 
 4. **Test Tab Integration**
    - Click on "RAG Assistant" tab
-   - Should load your React frontend
-   - Navigate to "Teams Integration" tab
-   - Verify Teams context is detected:
-     - Teams Environment: ✅ Running in Teams
+   - Confirm the Teams-specific search UI loads (port 5300 in dev)
+   - Ask a sample question and verify citations render
+   - Use the "Pop out" action to open the tab in a browser window
      - User information displayed
      - Team/Channel info (if in team context)
      - Theme integration working

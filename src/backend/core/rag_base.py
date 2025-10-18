@@ -213,13 +213,14 @@ class RagBase(ABC):
             raise
             
         # Always send LLM response processing step (even for "cannot answer" responses)
+        answer_text = (complete_response.get("answer") or "") if complete_response else ""
         await self._send_processing_step_message(
             request_id,
             response,
             ProcessingStep(
                 title="LLM response", 
                 type="code", 
-                description=f"LLM generated response. Answer length: {len(complete_response.get('answer', ''))} characters",
+                description=f"LLM generated response. Answer length: {len(answer_text)} characters",
                 content=complete_response
             ),
         )
@@ -231,8 +232,8 @@ class RagBase(ABC):
                 response,
                 grounding_retriever,
                 grounding_results["references"],
-                complete_response["text_citations"] or [],
-                complete_response["image_citations"] or [],
+                (complete_response.get("text_citations") or []),
+                (complete_response.get("image_citations") or []),
             )
         except Exception as citation_error:
             await self._send_processing_step_message(

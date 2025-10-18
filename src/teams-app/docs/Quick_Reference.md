@@ -16,9 +16,9 @@ npm run package
 
 ## 📱 Test URLs
 - **Backend Health**: http://localhost:5000/health
-- **Frontend**: http://localhost:5173
+- **Main Frontend**: http://localhost:5173
 - **Teams DevTools**: http://localhost:3979/devtools
-- **Teams Integration Tab**: http://localhost:5173 → "Teams Integration"
+- **Teams Personal Tab**: https://localhost:5300
 
 ## 🤖 Bot Commands to Test
 - `/help` - Show help and popular questions

@@ -1,0 +1,100 @@
+# yaml-language-server: $schema=https://aka.ms/teams-toolkit/1.0.0/yaml.schema.json
+#
+# Workspace-level configuration for Microsoft 365 Agents Toolkit.
+# This version points the toolkit at the Teams agent located under src/teams-app.
+version: 1.0.0
+
+environmentFolderPath: ./src/teams-app/env
+
+provision:
+  - uses: teamsApp/create
+    with:
+      name: TeamsApp${{APP_NAME_SUFFIX}}
+    writeToEnvironmentFile:
+      teamsAppId: TEAMS_APP_ID
+
+  - uses: aadApp/create
+    with:
+      name: TeamsApp${{APP_NAME_SUFFIX}}
+      generateClientSecret: true
+      signInAudience: AzureADMultipleOrgs
+    writeToEnvironmentFile:
+      clientId: BOT_ID
+      clientSecret: SECRET_BOT_PASSWORD
+      objectId: AAD_APP_OBJECT_ID
+      tenantId: AAD_APP_TENANT_ID
+
+  - uses: arm/deploy
+    with:
+      subscriptionId: ${{AZURE_SUBSCRIPTION_ID}}
+      resourceGroupName: ${{AZURE_RESOURCE_GROUP_NAME}}
+      templates:
+        - path: ./src/teams-app/infra/azure.bicep
+          parameters: ./src/teams-app/infra/azure.parameters.json
+          deploymentName: Create-resources-for-bot
+      bicepCliVersion: v0.9.1
+
+  - uses: teamsApp/validateManifest
+    with:
+      manifestPath: ./src/teams-app/appPackage/manifest.json
+
+  - uses: teamsApp/zipAppPackage
+    with:
+      manifestPath: ./src/teams-app/appPackage/manifest.json
+      outputZipPath: ./src/teams-app/appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+      outputJsonPath: ./src/teams-app/appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+
+  - uses: teamsApp/validateAppPackage
+    with:
+      appPackagePath: ./src/teams-app/appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+
+  - uses: teamsApp/update
+    with:
+      appPackagePath: ./src/teams-app/appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+
+deploy:
+  - uses: cli/runNpmCommand
+    name: install dependencies
+    with:
+      workingDirectory: ./src/teams-app
+      args: install
+
+  - uses: cli/runNpmCommand
+    name: build app
+    with:
+      workingDirectory: ./src/teams-app
+      args: run build --if-present
+
+  - uses: file/createOrUpdateEnvironmentFile
+    with:
+      target: ./src/teams-app/.env
+      envs:
+        BOT_ID: ${{BOT_ID}}
+        BOT_PASSWORD: ${{SECRET_BOT_PASSWORD}}
+        SECRET_BOT_PASSWORD: ${{SECRET_BOT_PASSWORD}}
+
+  - uses: azureAppService/zipDeploy
+    with:
+      artifactFolder: ./src/teams-app
+      ignoreFile: ./src/teams-app/.webappignore
+      resourceId: ${{BOT_AZURE_APP_SERVICE_RESOURCE_ID}}
+
+publish:
+  - uses: teamsApp/validateManifest
+    with:
+      manifestPath: ./src/teams-app/appPackage/manifest.json
+
+  - uses: teamsApp/zipAppPackage
+    with:
+      manifestPath: ./src/teams-app/appPackage/manifest.json
+      outputZipPath: ./src/teams-app/appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+      outputJsonPath: ./src/teams-app/appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+
+  - uses: teamsApp/validateAppPackage
+    with:
+      appPackagePath: ./src/teams-app/appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+
+  - uses: teamsApp/update
+    with:
+      appPackagePath: ./src/teams-app/appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+projectId: bbdc0323-93a7-4a3a-b1b1-95b6a43123ea
